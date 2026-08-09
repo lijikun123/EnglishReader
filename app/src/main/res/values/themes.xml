@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Lightweight bootstrap theme for the window/splash before Compose takes over.
+      Parented to a framework theme so we don't need the Material Components XML library.
+      All real theming (light / dark / sepia) is done in Compose (EnglishReaderTheme).
+    -->
+    <style name="Theme.EnglishReader" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/reader_background</item>
+        <item name="android:statusBarColor">@color/reader_background</item>
+    </style>
+</resources>

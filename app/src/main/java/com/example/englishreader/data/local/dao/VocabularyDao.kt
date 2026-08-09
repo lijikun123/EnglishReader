@@ -1,0 +1,32 @@
+package com.example.englishreader.data.local.dao
+
+import androidx.room.Dao
+import androidx.room.Delete
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.Update
+import com.example.englishreader.data.local.entity.VocabularyItem
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface VocabularyDao {
+
+    @Query("SELECT * FROM vocabulary_items ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<VocabularyItem>>
+
+    @Query("SELECT * FROM vocabulary_items WHERE id = :id")
+    fun observeById(id: Long): Flow<VocabularyItem?>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM vocabulary_items WHERE word = :word)")
+    suspend fun exists(word: String): Boolean
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: VocabularyItem): Long
+
+    @Update
+    suspend fun update(item: VocabularyItem)
+
+    @Delete
+    suspend fun delete(item: VocabularyItem)
+}
