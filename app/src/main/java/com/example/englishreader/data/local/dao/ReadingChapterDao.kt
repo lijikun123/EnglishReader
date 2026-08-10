@@ -35,6 +35,12 @@ interface ReadingChapterDao {
     )
     suspend fun getChapter(bookId: Long, index: Int): ReadingChapter?
 
+    @Query("SELECT * FROM reading_chapters WHERE readingItemId = :bookId ORDER BY chapterIndex")
+    suspend fun getAll(bookId: Long): List<ReadingChapter>
+
+    @Query("DELETE FROM reading_chapters WHERE readingItemId = :bookId")
+    suspend fun deleteForBook(bookId: Long)
+
     @Query(
         "UPDATE reading_chapters SET lastReadPosition = :position, progress = :progress, updatedAt = :updatedAt " +
             "WHERE readingItemId = :bookId AND chapterIndex = :index",

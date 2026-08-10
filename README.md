@@ -1,16 +1,23 @@
-# KReader（Kyan's Reader · 英文阅读 App）— v0.1.2
+# KReader（Kyan's Reader · 英文阅读 App）— v0.1.18
 
 面向**中文母语英语学习者**的本地英文阅读 App：舒服地读英文小说 / 外刊，遇到生词随手查中文释义、收藏到生词本，再导出到 Anki 复习。支持分页阅读、触摸/滑动翻页。
 
-> 定位：这不是词典 App，而是**阅读体验优先**的阅读 App。查词、生词本、导出、AI 都是辅助。完全本地运行，不依赖账号或服务器。
+> 定位：这不是词典 App，而是**阅读体验优先**的阅读 App。查词、生词本、导出、AI 都是辅助。默认本地优先；可选地用自建账号服务同步书架与阅读进度。
 
 - 技术栈：Kotlin · Coroutines/Flow · Jetpack Compose · Material 3 · Navigation Compose · Room · DataStore · MVVM + Repository · 手机/平板自适应（WindowSizeClass）
 - `minSdk 24`，`compileSdk / targetSdk 36`，AGP 8.13 / Kotlin 2.2 / Compose BOM 2026.05
-- 版本：`0.1.2`（versionCode 2）；applicationId 仍为 `com.example.englishreader`（未改，保留已安装数据）
+- 版本：`0.1.18`（versionCode 18）；applicationId 仍为 `com.example.englishreader`（未改，保留已安装数据）
 
 ---
 
 ## v0.1 已实现功能（真实可用）
+
+**跨设备同步（测试版）**
+- Android 手机/平板可登录同一自建账号，同步书架、TXT/Markdown/无 DRM EPUB 内容与阅读位置
+- 本地数据库仍是阅读界面的唯一数据源；离线写入先落到本机队列，联网后由 WorkManager 自动重试
+- 不同步 AI Key、AI/词典缓存、主题、字号或阅读排版设置；刷新令牌经过 Android Keystore 加密且不进入系统备份
+- 同一内容在两台设备重复导入会合并为一个云端书籍；进度按最后一次明确阅读位置合并
+- 服务端源码在 [`server/`](server/)；上线前先创建自己的 HTTPS 域名路径，并保持公开注册关闭
 
 **阅读**
 - 导入本地 **TXT / Markdown / EPUB**（无 DRM）文件并入库，书架显示书名、作者、格式、整本进度、上次时间
@@ -128,7 +135,7 @@ Anki 导入：Import → 分隔符选 Tab、字段映射 Front/Back、勾选「�
 
 ---
 
-## 数据库（Room，version 4）
+## 数据库（Room，version 8）
 
 | 表 | 用途 |
 |---|---|
@@ -139,8 +146,10 @@ Anki 导入：Import → 分隔符选 Tab、字段映射 Front/Back、勾选「�
 | `dictionary_entries` | 中英文词典（内置示例 + 导入） |
 | `lookup_history` | 查词历史 |
 | `ai_analysis_cache` | AI 分析缓存（配合 Stub） |
+| `sync_books` | 本地书籍 Long ID 与云端 UUID 的旁路映射、同步状态、暂存远端进度 |
+| `sync_outbox` | 可重试、幂等的本地同步任务队列 |
 
-> 注意：开发期 schema 仍用破坏式迁移；**升级安装若数据库版本变化会清空本地库一次**（示例数据会重新写入，需重新导入书/词典）。v0.1 之后若要保数据需改为正式迁移。
+> 注意：已有 v4→v8 的正式迁移；未覆盖的未知版本会显式失败，不会静默清空本地书籍。
 
 ---
 
@@ -151,7 +160,7 @@ Anki 导入：Import → 分隔符选 Tab、字段映射 Front/Back、勾选「�
 - 词典/书籍整文件读入内存解析，适合常见体量（几千~几万条 / 单本小说）
 - 大小写忽略仅针对 ASCII 英文词；词形还原是朴素规则
 - AI 四按钮为占位；查词依赖已导入/内置词典，未收录的词只显示提示
-- 升级若改 DB 版本会重置本地库一次（见上）
+- 同步首版仅覆盖书架、内容与阅读位置；生词、词典、AI 缓存与阅读显示设置仍是本机数据
 
 ---
 
@@ -164,5 +173,6 @@ Anki 导入：Import → 分隔符选 Tab、字段映射 Front/Back、勾选「�
 | 阅读设置 + 持久化 + 进度恢复 | ✅ 真实 |
 | 点词查词（内置 + CSV/JSON 导入词典） | ✅ 真实 |
 | 收藏生词 + Anki TSV 导出 | ✅ 真实 |
+| Android 手机/平板自建账号同步（书架/内容/进度） | 🟡 测试版 |
 | AI 四按钮（解释/翻译/语法/精读） | 🟡 Stub 占位（不联网，弹窗已标注） |
 | PDF / MOBI / AZW3 / MDX / StarDict / SRS | ⛔ 未做 |

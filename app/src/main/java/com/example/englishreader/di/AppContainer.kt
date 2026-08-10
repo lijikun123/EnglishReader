@@ -14,7 +14,15 @@ import com.example.englishreader.data.repository.DictionaryRepository
 import com.example.englishreader.data.repository.ReadingRepository
 import com.example.englishreader.data.repository.SettingsRepository
 import com.example.englishreader.data.repository.VocabularyRepository
+import com.example.englishreader.data.security.AiKeyStore
+import com.example.englishreader.data.sync.SyncApi
+import com.example.englishreader.data.sync.SyncRepository
+import com.example.englishreader.data.sync.SyncScheduler
+import com.example.englishreader.data.sync.SyncSettingsRepository
+import com.example.englishreader.data.sync.SyncTokenStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 手写的轻量依赖容器（Service Locator）。
@@ -31,18 +39,40 @@ class AppContainer(context: Context, scope: CoroutineScope) {
     val documentImporter = DocumentImporter(appContext)
     val dictionaryImporter = DictionaryImporter(appContext)
     val ankiExporter = AnkiExporter(appContext)
-    val settingsRepository = SettingsRepository(appContext.settingsDataStore)
+    private val aiKeyStore = AiKeyStore(appContext)
+    val settingsRepository = SettingsRepository(appContext.settingsDataStore, aiKeyStore)
+    private val syncSettingsRepository = SyncSettingsRepository(appContext.settingsDataStore)
+    private val syncScheduler = SyncScheduler(appContext)
+    private val syncTokenStore = SyncTokenStore(appContext)
+    private val syncApi = SyncApi()
+    val syncRepository = SyncRepository(
+        database = database,
+        readingItemDao = database.readingItemDao(),
+        chapterDao = database.readingChapterDao(),
+        tocDao = database.readingTocItemDao(),
+        syncBookDao = database.syncBookDao(),
+        outboxDao = database.syncOutboxDao(),
+        settingsRepository = syncSettingsRepository,
+        tokenStore = syncTokenStore,
+        api = syncApi,
+        scheduler = syncScheduler,
+    )
     val readingRepository = ReadingRepository(
         dao = database.readingItemDao(),
         chapterDao = database.readingChapterDao(),
         tocDao = database.readingTocItemDao(),
         database = database,
+        syncMutationWriter = syncRepository,
     )
     val dictionaryRepository = DictionaryRepository(
         dictionaryDao = database.dictionaryDao(),
         lookupHistoryDao = database.lookupHistoryDao(),
     )
     val vocabularyRepository = VocabularyRepository(database.vocabularyDao())
+
+    init {
+        scope.launch(Dispatchers.IO) { settingsRepository.migrateLegacyAiKey() }
+    }
 
     // 真实 AI：OpenAI 兼容的 Chat Completions（默认 DeepSeek）。连接配置 / 提示词来自「设置 → AI」。
     private val aiProvider = DeepSeekProvider()

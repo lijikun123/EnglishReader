@@ -15,6 +15,12 @@ interface ReadingTocItemDao {
     @Query("SELECT * FROM reading_toc_items WHERE readingItemId = :bookId ORDER BY orderIndex")
     fun observe(bookId: Long): Flow<List<ReadingTocItem>>
 
+    @Query("SELECT * FROM reading_toc_items WHERE readingItemId = :bookId ORDER BY orderIndex")
+    suspend fun getAll(bookId: Long): List<ReadingTocItem>
+
+    @Query("DELETE FROM reading_toc_items WHERE readingItemId = :bookId")
+    suspend fun deleteForBook(bookId: Long)
+
     @Query("SELECT COUNT(*) FROM reading_toc_items WHERE readingItemId = :bookId")
     suspend fun count(bookId: Long): Int
 }
