@@ -199,14 +199,19 @@ class SyncRepository(
     /**
      * A foreground request should never wait behind an old WorkManager job. Older
      * app builds queued one after login, and cancelling it lets the UI recover
-     * without touching the durable outbox or the periodic retry schedule.
+     * without touching the durable outbox.
      */
     suspend fun syncFromSettings(): SyncRunResult {
         scheduler.cancelOneTime()
-        return syncOnce(waitForCurrentSync = false)
+        return syncOnce(waitForCurrentSync = false).also { result ->
+            // After a fresh foreground sync has completed, restore the regular
+            // periodic schedule. Login deliberately cancels legacy work first so
+            // no worker can carry an old access token into the new account.
+            if (result == SyncRunResult.Success) scheduler.ensurePeriodic()
+        }
     }
 
-    private suspend fun syncLocked(): SyncRunResult {
+    private suspend fun syncLocked(retryAfterSessionChange: Boolean = true): SyncRunResult {
         var conflictConfiguration: SyncSettings? = null
         var conflictSession: SyncSession? = null
         return try {
@@ -244,6 +249,13 @@ class SyncRepository(
         } catch (error: SyncApiException) {
             val result = when (error.status) {
                 HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> {
+                    // A Worker from an older process can finish with an access
+                    // token captured before the user just logged in. Never let
+                    // that stale 401 erase the newer session it no longer owns.
+                    val failedSession = conflictSession
+                    if (retryAfterSessionChange && failedSession != null && hasSessionChangedSince(failedSession)) {
+                        return syncLocked(retryAfterSessionChange = false)
+                    }
                     tokenStore.clear()
                     clearLocalSyncSidecar()
                     settingsRepository.clearAccount()
@@ -280,7 +292,7 @@ class SyncRepository(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            val message = error.message ?: "同步暂时失败"
+            val message = userVisibleSyncError(error)
             _runtimeState.value = SyncRuntimeState(lastMessage = message)
             SyncRunResult.RetryableFailure(message)
         } finally {
@@ -302,11 +314,11 @@ class SyncRepository(
             require(endpoint.isNotBlank()) { "请先填写同步服务器地址" }
             val deviceId = settingsRepository.deviceId()
             val response = request(endpoint, deviceId)
-            // An old login used to queue a one-time worker. Cancel that stale
-            // work before replacing the session; syncMutex ensures an active
-            // worker cannot race this replacement. Keep the periodic schedule,
-            // which belongs to the successfully authenticated account.
-            scheduler.cancelOneTime()
+            // Clear all legacy work before replacing the session. A periodic
+            // worker may have captured an old access token before this explicit
+            // login; periodic scheduling resumes only after the first successful
+            // foreground sync with the fresh session.
+            scheduler.cancelAll()
             if ((previous.userId != null && previous.userId != response.user.id) ||
                 (previous.serverUrl.isNotBlank() && previous.serverUrl != endpoint)
             ) {
@@ -326,14 +338,13 @@ class SyncRepository(
             }
             settingsRepository.setServerUrl(endpoint)
             settingsRepository.setAccount(response.user.id, response.user.email)
-            scheduler.ensurePeriodic()
             // The settings screen performs the initial foreground sync immediately.
             SyncActionResult.Success
         }
     } catch (error: SyncApiException) {
         SyncActionResult.Failure(error.message)
     } catch (error: Exception) {
-        SyncActionResult.Failure(error.message ?: "无法连接同步服务")
+        SyncActionResult.Failure(userVisibleSyncError(error))
     }
 
     private suspend fun validSession(configuration: SyncSettings): SyncSession? = sessionMutex.withLock {
@@ -382,6 +393,24 @@ class SyncRepository(
 
     private fun hasEnoughAccessTokenLifetime(session: SyncSession): Boolean =
         session.accessTokenExpiresAt > System.currentTimeMillis() + ACCESS_TOKEN_REFRESH_SKEW_MILLIS
+
+    private fun userVisibleSyncError(error: Throwable): String {
+        val message = error.message?.takeIf { it.isNotBlank() } ?: "同步暂时失败"
+        return if (message.contains("connection closed", ignoreCase = true)) {
+            "同步连接被关闭。若平板开启了 Clash/代理，请将同步服务器设为 DIRECT 后重试。"
+        } else {
+            message
+        }
+    }
+
+    /** Returns true when another login/refresh replaced the failed session. */
+    private suspend fun hasSessionChangedSince(session: SyncSession): Boolean = sessionMutex.withLock {
+        val current = tokenStore.read()
+        current != null && (
+            current.accessToken != session.accessToken ||
+                current.refreshToken != session.refreshToken
+            )
+    }
 
     private suspend fun clearLocalSyncSidecar() {
         database.withTransaction {
