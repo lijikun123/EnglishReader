@@ -43,7 +43,10 @@ class SyncTokenStore(context: Context) {
             .putString(KEY_ACCESS, encrypt(session.accessToken))
             .putLong(KEY_EXPIRES_AT, session.accessTokenExpiresAt)
             .putString(KEY_REFRESH, encrypt(session.refreshToken))
-            .apply()
+            // Refresh tokens rotate server-side. A delayed `apply()` write can
+            // be lost if Android replaces the process, leaving a revoked token
+            // on disk. Persist this tiny encrypted record before continuing.
+            .commit()
     }
 
     @Synchronized

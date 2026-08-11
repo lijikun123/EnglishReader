@@ -17,6 +17,7 @@ import com.example.englishreader.data.sync.SyncRunResult
 import com.example.englishreader.data.sync.SyncRuntimeState
 import com.example.englishreader.data.sync.SyncSettings
 import com.example.englishreader.di.container
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -94,17 +95,27 @@ class SettingsViewModel(
     fun syncNow() {
         viewModelScope.launch {
             _syncActionInProgress.value = true
-            _message.value = syncResultMessage(syncRepository.syncOnce())
-            _syncActionInProgress.value = false
+            try {
+                _message.value = syncResultMessage(syncRepository.syncFromSettings())
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _message.value = "同步未完成：${error.message ?: "发生未知错误"}"
+            } finally {
+                _syncActionInProgress.value = false
+            }
         }
     }
 
     fun logoutSync() {
         viewModelScope.launch {
             _syncActionInProgress.value = true
-            syncRepository.logout()
-            _syncActionInProgress.value = false
-            _message.value = "已退出同步账号；本机书籍不会被删除"
+            try {
+                syncRepository.logout()
+                _message.value = "已退出同步账号；本机书籍不会被删除"
+            } finally {
+                _syncActionInProgress.value = false
+            }
         }
     }
 
@@ -121,16 +132,26 @@ class SettingsViewModel(
         }
         viewModelScope.launch {
             _syncActionInProgress.value = true
-            when (val result = request(serverUrl, email, password)) {
-                SyncActionResult.Success -> _message.value = "${action}成功，${syncResultMessage(syncRepository.syncOnce())}"
-                is SyncActionResult.Failure -> _message.value = result.message
+            try {
+                when (val result = request(serverUrl, email, password)) {
+                    SyncActionResult.Success -> {
+                        _message.value = "${action}成功，${syncResultMessage(syncRepository.syncFromSettings())}"
+                    }
+                    is SyncActionResult.Failure -> _message.value = result.message
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _message.value = "${action}未完成：${error.message ?: "发生未知错误"}"
+            } finally {
+                _syncActionInProgress.value = false
             }
-            _syncActionInProgress.value = false
         }
     }
 
     private fun syncResultMessage(result: SyncRunResult): String = when (result) {
         SyncRunResult.Success -> "已同步"
+        SyncRunResult.InProgress -> "后台同步正在收尾，请稍后再试"
         SyncRunResult.NotConfigured -> "请先填写 HTTPS 同步地址"
         SyncRunResult.NotAuthenticated -> "请先登录同步账号"
         is SyncRunResult.PermanentFailure -> "同步未完成：${result.message}"

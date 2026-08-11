@@ -17,11 +17,14 @@ import com.example.englishreader.data.local.entity.SyncBook
 import com.example.englishreader.data.local.entity.SyncOutbox
 import com.example.englishreader.data.local.entity.SyncOutboxKind
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -33,6 +36,8 @@ import java.util.UUID
 
 sealed interface SyncRunResult {
     data object Success : SyncRunResult
+    /** Another caller owns the sync lock; settings should not wait indefinitely. */
+    data object InProgress : SyncRunResult
     data object NotConfigured : SyncRunResult
     data object NotAuthenticated : SyncRunResult
     data class RetryableFailure(val message: String) : SyncRunResult
@@ -96,6 +101,8 @@ class SyncRepository(
 ) : SyncMutationWriter {
 
     private val syncMutex = Mutex()
+    /** Serializes rotating refresh-token reads/writes independently of UI work. */
+    private val sessionMutex = Mutex()
     private val _runtimeState = MutableStateFlow(SyncRuntimeState())
     val runtimeState: StateFlow<SyncRuntimeState> = _runtimeState.asStateFlow()
     val settings = settingsRepository.settings
@@ -179,14 +186,38 @@ class SyncRepository(
         if (queued) scheduler.enqueueSoon()
     }
 
-    suspend fun syncOnce(): SyncRunResult = syncMutex.withLock {
-        val configuration = settingsRepository.current()
-        if (configuration.serverUrl.isBlank()) return@withLock SyncRunResult.NotConfigured
-        if (configuration.userId.isNullOrBlank()) return@withLock SyncRunResult.NotAuthenticated
-        val session = validSession(configuration) ?: return@withLock SyncRunResult.NotAuthenticated
+    suspend fun syncOnce(waitForCurrentSync: Boolean = true): SyncRunResult {
+        if (waitForCurrentSync) return syncMutex.withLock { syncLocked() }
+        if (!syncMutex.tryLock()) return SyncRunResult.InProgress
+        return try {
+            syncLocked()
+        } finally {
+            syncMutex.unlock()
+        }
+    }
 
-        _runtimeState.value = SyncRuntimeState(syncing = true)
-        try {
+    /**
+     * A foreground request should never wait behind an old WorkManager job. Older
+     * app builds queued one after login, and cancelling it lets the UI recover
+     * without touching the durable outbox or the periodic retry schedule.
+     */
+    suspend fun syncFromSettings(): SyncRunResult {
+        scheduler.cancelOneTime()
+        return syncOnce(waitForCurrentSync = false)
+    }
+
+    private suspend fun syncLocked(): SyncRunResult {
+        var conflictConfiguration: SyncSettings? = null
+        var conflictSession: SyncSession? = null
+        return try {
+            val configuration = settingsRepository.current()
+            if (configuration.serverUrl.isBlank()) return SyncRunResult.NotConfigured
+            if (configuration.userId.isNullOrBlank()) return SyncRunResult.NotAuthenticated
+            val session = validSession(configuration) ?: return SyncRunResult.NotAuthenticated
+            conflictConfiguration = configuration
+            conflictSession = session
+
+            _runtimeState.value = SyncRuntimeState(syncing = true)
             val terminalFailures = mutableListOf<String>()
             // First activation uploads pre-existing books (including books imported
             // before the user ever configured a sync account).
@@ -205,7 +236,7 @@ class SyncRepository(
             if (terminalFailures.isNotEmpty()) {
                 val message = "部分本地变更未同步：${terminalFailures.first()}"
                 _runtimeState.value = SyncRuntimeState(lastMessage = message)
-                return@withLock SyncRunResult.PermanentFailure(message)
+                return SyncRunResult.PermanentFailure(message)
             }
             settingsRepository.markSuccessfulSync()
             _runtimeState.value = SyncRuntimeState(lastMessage = "已同步")
@@ -228,7 +259,11 @@ class SyncRepository(
                     // A concurrent device may have updated/deleted the book between
                     // metadata push and bundle upload. Reconcile before retrying.
                     if (error.code in STALE_BUNDLE_CODES) {
-                        runCatching { pullChanges(configuration, session) }
+                        val configuration = conflictConfiguration
+                        val session = conflictSession
+                        if (configuration != null && session != null) {
+                            runCatching { pullChanges(configuration, session) }
+                        }
                         SyncRunResult.RetryableFailure("${error.message}；已重新拉取服务器状态，将自动重试")
                     } else {
                         SyncRunResult.PermanentFailure(error.message)
@@ -242,10 +277,16 @@ class SyncRepository(
         } catch (error: SyncDataException) {
             _runtimeState.value = SyncRuntimeState(lastMessage = error.message)
             SyncRunResult.PermanentFailure(error.message)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             val message = error.message ?: "同步暂时失败"
             _runtimeState.value = SyncRuntimeState(lastMessage = message)
             SyncRunResult.RetryableFailure(message)
+        } finally {
+            if (_runtimeState.value.syncing) {
+                _runtimeState.value = SyncRuntimeState(lastMessage = "同步已中断")
+            }
         }
     }
 
@@ -253,47 +294,83 @@ class SyncRepository(
         serverUrl: String,
         request: suspend (endpoint: String, deviceId: String) -> AuthResponse,
     ): SyncActionResult = try {
-        val previous = settingsRepository.current()
-        // Do not persist or send existing session material to a new endpoint
-        // until this fresh email/password authentication has actually succeeded.
-        val endpoint = SyncSettingsRepository.normalizeServerUrl(serverUrl)
-        require(endpoint.isNotBlank()) { "请先填写同步服务器地址" }
-        val deviceId = settingsRepository.deviceId()
-        val response = request(endpoint, deviceId)
-        if ((previous.userId != null && previous.userId != response.user.id) ||
-            (previous.serverUrl.isNotBlank() && previous.serverUrl != endpoint)
-        ) {
-            // Never let an old account/server's mapping decide what gets uploaded
-            // to a newly authenticated account. Local books themselves stay put.
-            clearLocalSyncSidecar()
+        syncMutex.withLock {
+            val previous = settingsRepository.current()
+            // Do not persist or send existing session material to a new endpoint
+            // until this fresh email/password authentication has actually succeeded.
+            val endpoint = SyncSettingsRepository.normalizeServerUrl(serverUrl)
+            require(endpoint.isNotBlank()) { "请先填写同步服务器地址" }
+            val deviceId = settingsRepository.deviceId()
+            val response = request(endpoint, deviceId)
+            // An old login used to queue a one-time worker. Cancel that stale
+            // work before replacing the session; syncMutex ensures an active
+            // worker cannot race this replacement. Keep the periodic schedule,
+            // which belongs to the successfully authenticated account.
+            scheduler.cancelOneTime()
+            if ((previous.userId != null && previous.userId != response.user.id) ||
+                (previous.serverUrl.isNotBlank() && previous.serverUrl != endpoint)
+            ) {
+                // Never let an old account/server's mapping decide what gets uploaded
+                // to a newly authenticated account. Local books themselves stay put.
+                clearLocalSyncSidecar()
+            }
+            // Clearing first makes a storage failure safe: an old session can never
+            // be paired with the just-authenticated endpoint. `save()` is committed
+            // off the UI thread so a process replacement cannot resurrect its old
+            // refresh token.
+            sessionMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    tokenStore.clear()
+                    tokenStore.save(SyncSession(response.accessToken, response.accessTokenExpiresAt, response.refreshToken))
+                }
+            }
+            settingsRepository.setServerUrl(endpoint)
+            settingsRepository.setAccount(response.user.id, response.user.email)
+            scheduler.ensurePeriodic()
+            // The settings screen performs the initial foreground sync immediately.
+            SyncActionResult.Success
         }
-        // Clearing first makes a storage failure safe: an old session can never
-        // be paired with the just-authenticated endpoint.
-        tokenStore.clear()
-        settingsRepository.setServerUrl(endpoint)
-        settingsRepository.setAccount(response.user.id, response.user.email)
-        tokenStore.save(SyncSession(response.accessToken, response.accessTokenExpiresAt, response.refreshToken))
-        scheduler.ensurePeriodic()
-        scheduler.enqueueSoon()
-        SyncActionResult.Success
     } catch (error: SyncApiException) {
         SyncActionResult.Failure(error.message)
     } catch (error: Exception) {
         SyncActionResult.Failure(error.message ?: "无法连接同步服务")
     }
 
-    private suspend fun validSession(configuration: SyncSettings): SyncSession? {
-        val existing = tokenStore.read() ?: return null
-        if (existing.accessTokenExpiresAt > System.currentTimeMillis() + 60_000L) return existing
+    private suspend fun validSession(configuration: SyncSettings): SyncSession? = sessionMutex.withLock {
+        val existing = tokenStore.read() ?: return@withLock null
+        if (hasEnoughAccessTokenLifetime(existing)) return@withLock existing
+        refreshSessionLocked(configuration, existing, allowStoredReplacement = true)
+    }
+
+    /**
+     * Refresh tokens rotate: a second caller holding the just-revoked value must
+     * never erase a newer session that was already saved by another caller.
+     * Call only while [sessionMutex] is held.
+     */
+    private suspend fun refreshSessionLocked(
+        configuration: SyncSettings,
+        existing: SyncSession,
+        allowStoredReplacement: Boolean,
+    ): SyncSession? {
         return try {
             val refreshed = api.refresh(
                 configuration.serverUrl,
                 RefreshRequest(existing.refreshToken, settingsRepository.deviceId()),
             )
-            SyncSession(refreshed.accessToken, refreshed.accessTokenExpiresAt, refreshed.refreshToken).also(tokenStore::save)
+            SyncSession(refreshed.accessToken, refreshed.accessTokenExpiresAt, refreshed.refreshToken).also { session ->
+                withContext(Dispatchers.IO) { tokenStore.save(session) }
+            }
         } catch (error: SyncApiException) {
             if (error.status == HttpStatusCode.Unauthorized || error.status == HttpStatusCode.Forbidden) {
-                tokenStore.clear()
+                val replacement = tokenStore.read()
+                if (allowStoredReplacement && replacement != null && replacement.refreshToken != existing.refreshToken) {
+                    return if (hasEnoughAccessTokenLifetime(replacement)) {
+                        replacement
+                    } else {
+                        refreshSessionLocked(configuration, replacement, allowStoredReplacement = false)
+                    }
+                }
+                withContext(Dispatchers.IO) { tokenStore.clear() }
                 clearLocalSyncSidecar()
                 settingsRepository.clearAccount()
                 null
@@ -302,6 +379,9 @@ class SyncRepository(
             }
         }
     }
+
+    private fun hasEnoughAccessTokenLifetime(session: SyncSession): Boolean =
+        session.accessTokenExpiresAt > System.currentTimeMillis() + ACCESS_TOKEN_REFRESH_SKEW_MILLIS
 
     private suspend fun clearLocalSyncSidecar() {
         database.withTransaction {
@@ -834,6 +914,9 @@ class SyncRepository(
 
     private companion object {
         const val MAX_PUSH_MUTATIONS = 100
+        // A first full-library upload can take a while on mobile data. Refresh
+        // well before the 15-minute access JWT can expire in the middle of it.
+        const val ACCESS_TOKEN_REFRESH_SKEW_MILLIS = 5 * 60 * 1_000L
         val STALE_BUNDLE_CODES = setOf("bundle_stale", "book_deleted")
     }
 }

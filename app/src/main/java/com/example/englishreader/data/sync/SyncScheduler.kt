@@ -36,8 +36,12 @@ class SyncScheduler(private val context: Context) {
         )
     }
 
-    fun cancelAll() {
+    fun cancelOneTime() {
         workManager.cancelUniqueWork(ONE_TIME_NAME)
+    }
+
+    fun cancelAll() {
+        cancelOneTime()
         workManager.cancelUniqueWork(PERIODIC_NAME)
     }
 
@@ -50,6 +54,7 @@ class SyncScheduler(private val context: Context) {
 class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result = when ((applicationContext as EnglishReaderApp).container.syncRepository.syncOnce()) {
         SyncRunResult.Success,
+        SyncRunResult.InProgress,
         SyncRunResult.NotConfigured,
         SyncRunResult.NotAuthenticated,
         is SyncRunResult.PermanentFailure,
