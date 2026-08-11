@@ -57,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.englishreader.ai.AiAnalysisType
 import com.example.englishreader.data.local.entity.BookFormat
+import com.example.englishreader.data.local.entity.ReadingChapter
 import com.example.englishreader.data.model.DetectedPhrase
 import com.example.englishreader.data.model.ReadingSettings
 import kotlin.math.ceil
@@ -73,6 +74,7 @@ fun ReaderScreen(
     val aiResult by viewModel.aiResult.collectAsStateWithLifecycle()
     val chapters by viewModel.chapters.collectAsStateWithLifecycle()
     val currentChapter by viewModel.currentChapter.collectAsStateWithLifecycle()
+    val adjacentChapters by viewModel.adjacentChapters.collectAsStateWithLifecycle()
     val toc by viewModel.toc.collectAsStateWithLifecycle()
     val pendingTarget by viewModel.pendingTarget.collectAsStateWithLifecycle()
     val chapterLengths by viewModel.chapterLengths.collectAsStateWithLifecycle()
@@ -91,6 +93,11 @@ fun ReaderScreen(
     val restorePosition = if (isEpub) currentChapter?.lastReadPosition ?: 0 else item?.lastReadPosition ?: 0
     val restoreKey = if (isEpub) currentChapter?.id else item?.id
     val currentChapterIndex = currentChapter?.chapterIndex ?: 0
+    // Neighbours are loaded independently; never curl a new current chapter
+    // into a stale neighbour left over from the preceding chapter.
+    val matchingAdjacentChapters = adjacentChapters.takeIf {
+        it.forChapterIndex == currentChapterIndex
+    } ?: AdjacentChapters()
 
     // 标题清洗：去掉历史数据里残留的 ￼，空则回退
     val rawTitle = if (isEpub) currentChapter?.title else item?.title
@@ -131,6 +138,7 @@ fun ReaderScreen(
                 Box(Modifier.fillMaxSize().padding(padding)) {
                     ReaderArea(
                         chapter = chapter, settings = settings, style = style,
+                        previousChapter = matchingAdjacentChapters.previous, nextChapter = matchingAdjacentChapters.next,
                         restoreKey = restoreKey, restorePosition = restorePosition,
                         isEpub = isEpub, currentChapterIndex = currentChapterIndex,
                         chapterCount = chapters.size, chapterLengths = chapterLengths,
@@ -160,6 +168,7 @@ fun ReaderScreen(
             else -> {
                 ReaderArea(
                     chapter = chapter, settings = settings, style = style,
+                    previousChapter = matchingAdjacentChapters.previous, nextChapter = matchingAdjacentChapters.next,
                     restoreKey = restoreKey, restorePosition = restorePosition,
                     isEpub = isEpub, currentChapterIndex = currentChapterIndex,
                     chapterCount = chapters.size, chapterLengths = chapterLengths,
@@ -222,6 +231,8 @@ private fun ReaderArea(
     chapter: ChapterText,
     settings: ReadingSettings,
     style: TextStyle,
+    previousChapter: ReadingChapter?,
+    nextChapter: ReadingChapter?,
     restoreKey: Any?,
     restorePosition: Int,
     isEpub: Boolean,
@@ -260,6 +271,20 @@ private fun ReaderArea(
         val pages = remember(chapter.text, style, pageWidthPx, pageHeightPx) {
             paginate(measurer, chapter.text, style, pageWidthPx, pageHeightPx)
         }
+        // Adjacent EPUB chapters are laid out with exactly the same geometry.
+        // Their edge spread becomes the page beneath a cross-chapter curl.
+        val previousChapterText = remember(previousChapter?.id, previousChapter?.content) {
+            previousChapter?.let { buildChapterText(it.content) }
+        }
+        val nextChapterText = remember(nextChapter?.id, nextChapter?.content) {
+            nextChapter?.let { buildChapterText(it.content) }
+        }
+        val previousPages = remember(previousChapterText?.text, style, pageWidthPx, pageHeightPx) {
+            previousChapterText?.let { paginate(measurer, it.text, style, pageWidthPx, pageHeightPx) }.orEmpty()
+        }
+        val nextPages = remember(nextChapterText?.text, style, pageWidthPx, pageHeightPx) {
+            nextChapterText?.let { paginate(measurer, it.text, style, pageWidthPx, pageHeightPx) }.orEmpty()
+        }
 
         var showControls by rememberSaveable { mutableStateOf(false) }
         val bilingual by viewModel.bilingualMode.collectAsStateWithLifecycle()
@@ -288,6 +313,28 @@ private fun ReaderArea(
             // 当前阅读位置：页起始字符偏移，不随字号变化；翻页时更新，重排后据此定位
             var anchorOffset by remember { mutableIntStateOf(initialOffset) }
             var currentPage by remember { mutableIntStateOf(pageIndexForOffset(pages, initialOffset)) }
+
+            val canCrossNext = isEpub && currentChapterIndex < chapterCount - 1
+            val canCrossPrev = isEpub && currentChapterIndex > 0
+            // Save cross-chapter locations in one ordered ViewModel coroutine.
+            // This covers one-page chapters too, which otherwise never emit an
+            // in-chapter page-change event at their final page.
+            val onCrossNext = {
+                if (canCrossNext) {
+                    viewModel.crossToNextChapter(currentChapterIndex)
+                }
+            }
+            val onCrossPrev = {
+                if (canCrossPrev) {
+                    viewModel.crossToPreviousChapter(currentChapterIndex)
+                }
+            }
+            val crossNextEnglishSheet = remember(nextChapterText, nextPages, columns) {
+                edgeSheet(nextChapterText, nextPages, columns, first = true)
+            }
+            val crossPrevEnglishSheet = remember(previousChapterText, previousPages, columns) {
+                edgeSheet(previousChapterText, previousPages, columns, first = false)
+            }
 
             val pageCountSafe = pages.size.coerceAtLeast(1)
             // 双页时 currentPage 是这张纸的左页，进度按看到的右页算
@@ -375,11 +422,20 @@ private fun ReaderArea(
                                                 val paraIdx = biParaOffsets.indexOfLast { it <= biOff }.coerceAtLeast(0)
                                                 val enOff = chapter.paragraphOffsets.getOrElse(paraIdx) { 0 }
                                                 anchorOffset = enOff
-                                                viewModel.savePagedProgress(enOff, (p + 1f) / biPages.size)
+                                                viewModel.savePagedProgress(
+                                                    enOff,
+                                                    ((p + columns).toFloat() / biPages.size).coerceAtMost(1f),
+                                                )
                                             }
                                         },
-                                        onCrossNext = { if (isEpub && currentChapterIndex < chapterCount - 1) viewModel.nextChapter() },
-                                        onCrossPrev = { if (isEpub && currentChapterIndex > 0) viewModel.prevChapterToLastPage() },
+                                        onCrossNext = onCrossNext,
+                                        onCrossPrev = onCrossPrev,
+                                        canCrossNext = canCrossNext,
+                                        canCrossPrev = canCrossPrev,
+                                        // The adjacent chapter's bilingual layout may not be ready;
+                                        // PageCurlReader falls back to one continuous edge swipe.
+                                        crossNextSheet = null,
+                                        crossPrevSheet = null,
                                         onWord = viewModel::onWordTapped,
                                         onLongPress = { sentence, paragraph -> viewModel.openSentenceMenu(sentence, paragraph) },
                                         onToggleControls = { showControls = !showControls },
@@ -417,11 +473,18 @@ private fun ReaderArea(
                                         if (p / columns != anchorSheet && pages.isNotEmpty()) {
                                             val off = pages.getOrNull(p)?.first ?: 0
                                             anchorOffset = off
-                                            viewModel.savePagedProgress(off, (p + 1f) / pages.size)
+                                            viewModel.savePagedProgress(
+                                                off,
+                                                ((p + columns).toFloat() / pages.size).coerceAtMost(1f),
+                                            )
                                         }
                                     },
-                                    onCrossNext = { if (isEpub && currentChapterIndex < chapterCount - 1) viewModel.nextChapter() },
-                                    onCrossPrev = { if (isEpub && currentChapterIndex > 0) viewModel.prevChapterToLastPage() },
+                                    onCrossNext = onCrossNext,
+                                    onCrossPrev = onCrossPrev,
+                                    canCrossNext = canCrossNext,
+                                    canCrossPrev = canCrossPrev,
+                                    crossNextSheet = crossNextEnglishSheet,
+                                    crossPrevSheet = crossPrevEnglishSheet,
                                     onWord = viewModel::onWordTapped,
                                     onLongPress = { sentence, paragraph -> viewModel.openSentenceMenu(sentence, paragraph) },
                                     onToggleControls = { showControls = !showControls },
@@ -512,13 +575,31 @@ private fun ReaderArea(
                         showChapterNav = isEpub,
                         canPrevChapter = currentChapterIndex > 0,
                         canNextChapter = currentChapterIndex < chapterCount - 1,
-                        onPrevChapter = { viewModel.prevChapter() },
-                        onNextChapter = { viewModel.nextChapter() },
+                        onPrevChapter = { viewModel.prevChapter(currentChapterIndex) },
+                        onNextChapter = { viewModel.nextChapter(currentChapterIndex) },
                         onToc = onToc,
                     )
                 }
             }
         }
+    }
+}
+
+/** The first or last single/double-page spread from an adjacent chapter. */
+private fun edgeSheet(
+    chapter: ChapterText?,
+    pages: List<IntRange>,
+    columns: Int,
+    first: Boolean,
+): List<AnnotatedString?>? {
+    if (chapter == null || pages.isEmpty()) return null
+    val cols = columns.coerceAtLeast(1)
+    val firstPage = if (first) 0 else (pages.lastIndex / cols) * cols
+    return List(cols) { column ->
+        val range = pages.getOrNull(firstPage + column) ?: return@List null
+        val start = range.first.coerceIn(0, chapter.annotated.length)
+        val end = (range.last + 1).coerceIn(start, chapter.annotated.length)
+        chapter.annotated.subSequence(start, end)
     }
 }
 
