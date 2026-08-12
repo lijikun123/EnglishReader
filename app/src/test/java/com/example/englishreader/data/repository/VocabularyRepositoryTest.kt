@@ -46,6 +46,10 @@ class VocabularyRepositoryTest {
             saved.removeAll { it.id == item.id }
         }
 
+        override suspend fun deleteByIds(ids: List<Long>) {
+            saved.removeAll { it.id in ids }
+        }
+
         override suspend fun clearBookReference(readingItemId: Long) = Unit
     }
 }

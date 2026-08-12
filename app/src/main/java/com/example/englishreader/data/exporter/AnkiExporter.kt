@@ -2,20 +2,29 @@ package com.example.englishreader.data.exporter
 
 import android.content.Context
 import android.net.Uri
+import androidx.core.content.FileProvider
 import com.example.englishreader.data.local.entity.VocabularyItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 
-/** 把文本写入 SAF 选定的 Uri（UTF-8）。 */
+/** 生成可由 Android 分享面板读取的临时 UTF-8 TSV 文件。 */
 class AnkiExporter(private val context: Context) {
 
-    suspend fun write(uri: Uri, content: String): Unit = withContext(Dispatchers.IO) {
-        context.contentResolver.openOutputStream(uri)?.use { out ->
+    suspend fun createShareUri(content: String): Uri = withContext(Dispatchers.IO) {
+        val exportDir = File(context.cacheDir, "vocabulary_exports")
+        if (!exportDir.exists() && !exportDir.mkdirs()) {
+            throw IOException("无法创建导出目录")
+        }
+
+        val file = File(exportDir, "english_reader_vocabulary_${System.currentTimeMillis()}.tsv")
+        file.outputStream().use { out ->
             out.write(content.toByteArray(StandardCharsets.UTF_8))
             out.flush()
-        } ?: throw IOException("无法写入文件")
+        }
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 }
 

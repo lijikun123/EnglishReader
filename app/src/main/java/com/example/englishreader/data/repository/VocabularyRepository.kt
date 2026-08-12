@@ -35,6 +35,10 @@ class VocabularyRepository(private val dao: VocabularyDao) {
 
     suspend fun delete(item: VocabularyItem) = dao.delete(item)
 
+    suspend fun deleteByIds(ids: List<Long>) {
+        if (ids.isNotEmpty()) dao.deleteByIds(ids)
+    }
+
     private fun normalizedKey(value: String): String = displayWord(value).lowercase(Locale.ROOT)
 
     private fun displayWord(value: String): String = value.trim().replace(Regex("\\s+"), " ")

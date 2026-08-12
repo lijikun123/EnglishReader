@@ -162,6 +162,13 @@ fun ReaderScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                     if (lookup != null) {
+                        // 平板上的查词面板不是 BottomSheet，因此需要自己提供一层
+                        // 可点击的遮罩；点正文空白处即可关闭，而面板本身仍正常接收点击。
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(onClick = viewModel::dismissLookup),
+                        )
                         Surface(
                             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(360.dp),
                             tonalElevation = 2.dp,
