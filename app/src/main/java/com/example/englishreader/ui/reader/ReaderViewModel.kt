@@ -51,6 +51,14 @@ data class LookupUiState(
     val saved: Boolean = false,
 )
 
+/** 词组弹窗的内容及它是否已经进入生词本。 */
+data class PhrasePopupUiState(
+    val phrase: DetectedPhrase,
+    /** 当前词组所在段落，作为复习时的上下文保存。 */
+    val sourceSentence: String,
+    val saved: Boolean = false,
+)
+
 /** AI 分析结果 UI 状态。 */
 data class AiResultUiState(
     val type: AiAnalysisType,
@@ -209,7 +217,12 @@ class ReaderViewModel(
             dictionaryRepository.recordLookup(cleaned, sentence, readingItemId)
             _aiResult.value = null
             _sentenceMenu.value = null
-            _lookup.value = LookupUiState(word = cleaned, sentence = sentence, entries = entries)
+            _lookup.value = LookupUiState(
+                word = cleaned,
+                sentence = sentence,
+                entries = entries,
+                saved = vocabularyRepository.exists(cleaned),
+            )
         }
     }
 
@@ -222,7 +235,7 @@ class ReaderViewModel(
         val state = _lookup.value ?: return
         viewModelScope.launch {
             val first = state.entries.firstOrNull()
-            vocabularyRepository.save(
+            vocabularyRepository.saveIfAbsent(
                 VocabularyItem(
                     word = state.word,
                     lemma = first?.lemma ?: state.word,
@@ -238,7 +251,8 @@ class ReaderViewModel(
                     note = note,
                 ),
             )
-            _lookup.value = state.copy(saved = true)
+            // A newer lookup may have opened while the database write was running.
+            if (_lookup.value == state) _lookup.value = state.copy(saved = true)
         }
     }
 
@@ -357,8 +371,9 @@ class ReaderViewModel(
 
     private val phraseGate = Semaphore(2)
 
-    private val _phrasePopup = MutableStateFlow<DetectedPhrase?>(null)
-    val phrasePopup: StateFlow<DetectedPhrase?> = _phrasePopup.asStateFlow()
+    private val _phrasePopup = MutableStateFlow<PhrasePopupUiState?>(null)
+    val phrasePopup: StateFlow<PhrasePopupUiState?> = _phrasePopup.asStateFlow()
+    private var phrasePopupRequestId = 0L
 
     fun setPhraseMode(on: Boolean) {
         viewModelScope.launch { settingsRepository.setPhraseMode(on) }
@@ -402,18 +417,28 @@ class ReaderViewModel(
         }
     }
 
-    fun showPhrase(phrase: DetectedPhrase) {
-        _phrasePopup.value = phrase
+    fun showPhrase(phrase: DetectedPhrase, sourceSentence: String) {
+        val requestId = ++phrasePopupRequestId
+        val initial = PhrasePopupUiState(phrase = phrase, sourceSentence = sourceSentence)
+        _phrasePopup.value = initial
+        viewModelScope.launch {
+            val saved = vocabularyRepository.exists(phrase.phrase)
+            if (requestId == phrasePopupRequestId && _phrasePopup.value == initial) {
+                _phrasePopup.value = initial.copy(saved = saved)
+            }
+        }
     }
 
     fun dismissPhrase() {
+        phrasePopupRequestId++
         _phrasePopup.value = null
     }
 
     fun savePhraseToVocabulary() {
-        val p = _phrasePopup.value ?: return
+        val popup = _phrasePopup.value ?: return
+        val p = popup.phrase
         viewModelScope.launch {
-            vocabularyRepository.save(
+            vocabularyRepository.saveIfAbsent(
                 VocabularyItem(
                     word = p.phrase,
                     lemma = p.phrase.lowercase(),
@@ -422,14 +447,14 @@ class ReaderViewModel(
                     chineseMeaning = p.explanation,
                     englishDefinition = "",
                     exampleSentence = "",
-                    sourceSentence = "",
+                    sourceSentence = popup.sourceSentence,
                     sourceReadingItemId = readingItemId,
                     sourceBookTitle = readingItem.value?.title.orEmpty(),
                     sourceChapterTitle = currentChapter.value?.title.orEmpty(),
                     note = "",
                 ),
             )
-            _phrasePopup.value = null
+            if (_phrasePopup.value == popup) _phrasePopup.value = popup.copy(saved = true)
         }
     }
 

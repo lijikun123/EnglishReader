@@ -304,7 +304,7 @@ fun SettingsScreen(
             SettingsSection(title = "导出设置") {
                 DisabledRow(
                     title = "导出生词到 Anki TSV",
-                    subtitle = "即将推出",
+                    subtitle = "请在「生词本」右上角点击导出图标，保存后可在 Anki / AnkiDroid 导入。",
                 )
             }
         }

@@ -90,4 +90,6 @@ dependencies {
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.androidx.work.runtime.ktx)
+
+    testImplementation("junit:junit:4.13.2")
 }

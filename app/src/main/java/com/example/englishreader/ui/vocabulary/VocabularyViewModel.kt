@@ -31,7 +31,10 @@ class VocabularyViewModel(
     val message: StateFlow<String?> = _message.asStateFlow()
 
     fun delete(item: VocabularyItem) {
-        viewModelScope.launch { vocabularyRepository.delete(item) }
+        viewModelScope.launch {
+            vocabularyRepository.delete(item)
+            _message.value = "已删除「${item.word}」"
+        }
     }
 
     fun notifyEmpty() {

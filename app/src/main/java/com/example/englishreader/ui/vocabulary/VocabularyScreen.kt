@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,11 +25,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontStyle
@@ -47,6 +51,7 @@ fun VocabularyScreen(
     val items by viewModel.items.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    var pendingDeletion by remember { mutableStateOf<VocabularyItem?>(null) }
 
     // SAF 创建文档：返回 null 表示用户取消保存。
     val exportLauncher = rememberLauncherForActivityResult(
@@ -84,7 +89,7 @@ fun VocabularyScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "还没有收藏生词\n在阅读时点击单词即可收藏",
+                    text = "还没有收藏内容\n阅读时点击单词即可收藏；开启「词组」后也可收藏 AI 识别的词组",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -98,15 +103,26 @@ fun VocabularyScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(items, key = { it.id }) { item ->
-                    VocabularyCard(item = item, onDelete = { viewModel.delete(item) })
+                    VocabularyCard(item = item, onDeleteRequest = { pendingDeletion = item })
                 }
             }
         }
     }
+
+    pendingDeletion?.let { item ->
+        DeleteVocabularyDialog(
+            item = item,
+            onConfirm = {
+                viewModel.delete(item)
+                pendingDeletion = null
+            },
+            onDismiss = { pendingDeletion = null },
+        )
+    }
 }
 
 @Composable
-private fun VocabularyCard(item: VocabularyItem, onDelete: () -> Unit) {
+private fun VocabularyCard(item: VocabularyItem, onDeleteRequest: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Row(
@@ -127,7 +143,7 @@ private fun VocabularyCard(item: VocabularyItem, onDelete: () -> Unit) {
                         )
                     }
                 }
-                IconButton(onClick = onDelete) {
+                IconButton(onClick = onDeleteRequest) {
                     Icon(Icons.Filled.Delete, contentDescription = "删除")
                 }
             }
@@ -178,4 +194,24 @@ private fun VocabularyCard(item: VocabularyItem, onDelete: () -> Unit) {
             )
         }
     }
+}
+
+@Composable
+private fun DeleteVocabularyDialog(
+    item: VocabularyItem,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("删除收藏？") },
+        text = {
+            Text(
+                "「${item.word}」会从当前设备的生词本删除，不会影响原书。" +
+                    "生词本跨设备同步尚未启用。",
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("删除") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }

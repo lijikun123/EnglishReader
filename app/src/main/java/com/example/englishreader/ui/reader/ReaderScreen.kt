@@ -213,9 +213,13 @@ fun ReaderScreen(
             }
         }
 
-        phrasePopup?.let { phrase ->
+        phrasePopup?.let { popup ->
             ModalBottomSheet(onDismissRequest = viewModel::dismissPhrase) {
-                PhraseSheet(phrase = phrase, onSave = { viewModel.savePhraseToVocabulary() })
+                PhraseSheet(
+                    phrase = popup.phrase,
+                    saved = popup.saved,
+                    onSave = viewModel::savePhraseToVocabulary,
+                )
             }
         }
 
@@ -471,7 +475,11 @@ private fun ReaderArea(
                                         onWord = viewModel::onWordTapped,
                                         onLongPress = { sentence, paragraph -> viewModel.openSentenceMenu(sentence, paragraph) },
                                         onToggleControls = { showControls = !showControls },
-                                        onPhrase = { pIdx, phIdx -> phrases[pIdx]?.getOrNull(phIdx)?.let { viewModel.showPhrase(it) } },
+                                        onPhrase = { pIdx, phIdx ->
+                                            phrases[pIdx]?.getOrNull(phIdx)?.let { phrase ->
+                                                viewModel.showPhrase(phrase, enParagraphs.getOrNull(pIdx).orEmpty())
+                                            }
+                                        },
                                         bilingual = true,
                                         columns = columns,
                                         modifier = Modifier.fillMaxSize(),
@@ -520,7 +528,11 @@ private fun ReaderArea(
                                     onWord = viewModel::onWordTapped,
                                     onLongPress = { sentence, paragraph -> viewModel.openSentenceMenu(sentence, paragraph) },
                                     onToggleControls = { showControls = !showControls },
-                                    onPhrase = { pIdx, phIdx -> phrases[pIdx]?.getOrNull(phIdx)?.let { viewModel.showPhrase(it) } },
+                                    onPhrase = { pIdx, phIdx ->
+                                        phrases[pIdx]?.getOrNull(phIdx)?.let { phrase ->
+                                            viewModel.showPhrase(phrase, enParagraphs.getOrNull(pIdx).orEmpty())
+                                        }
+                                    },
                                     columns = columns,
                                     modifier = Modifier.fillMaxSize(),
                                 )
@@ -669,8 +681,7 @@ private fun BilingualTranslatingProgress(
 
 /** 词组弹窗：词组 + 中文解释 + 收藏到生词本。 */
 @Composable
-private fun PhraseSheet(phrase: DetectedPhrase, onSave: () -> Unit) {
-    var saved by remember { mutableStateOf(false) }
+private fun PhraseSheet(phrase: DetectedPhrase, saved: Boolean, onSave: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(phrase.phrase, style = MaterialTheme.typography.titleMedium)
@@ -696,7 +707,7 @@ private fun PhraseSheet(phrase: DetectedPhrase, onSave: () -> Unit) {
             modifier = Modifier.padding(top = 10.dp),
         )
         Button(
-            onClick = { onSave(); saved = true },
+            onClick = onSave,
             enabled = !saved,
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
         ) {
