@@ -69,6 +69,7 @@ fun ReaderScreen(
     viewModel: ReaderViewModel = viewModel(factory = ReaderViewModel.Factory),
 ) {
     val item by viewModel.readingItem.collectAsStateWithLifecycle()
+    val readingItemLoaded by viewModel.readingItemLoaded.collectAsStateWithLifecycle()
     val settings by viewModel.readingSettings.collectAsStateWithLifecycle()
     val lookup by viewModel.lookup.collectAsStateWithLifecycle()
     val aiResult by viewModel.aiResult.collectAsStateWithLifecycle()
@@ -87,7 +88,7 @@ fun ReaderScreen(
     val clipboard = LocalClipboardManager.current
 
     val isEpub = item?.format == BookFormat.EPUB
-    val loading = item == null || (isEpub && currentChapter == null)
+    val loading = !readingItemLoaded || (isEpub && currentChapter == null)
 
     val text = if (isEpub) currentChapter?.content else item?.content
     val restorePosition = if (isEpub) currentChapter?.lastReadPosition ?: 0 else item?.lastReadPosition ?: 0
@@ -127,9 +128,22 @@ fun ReaderScreen(
     // 沉浸式：不再用顶部 AppBar / 底部大栏，留白交给正文
     Scaffold { padding ->
         when {
-            loading || chapter == null -> {
+            loading -> {
                 Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
+                }
+            }
+
+            item == null -> {
+                DeletedBookScreen(
+                    onBack = onBack,
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                )
+            }
+
+            chapter == null -> {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    Text("这本书暂时无法打开")
                 }
             }
 
@@ -221,6 +235,24 @@ fun ReaderScreen(
         if (showSettings) {
             ModalBottomSheet(onDismissRequest = { showSettings = false }) {
                 ReaderSettingsSheet(settings = settings, onChange = { transform -> viewModel.updateReadingSettings(transform) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeletedBookScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("书籍已删除", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "它可能已在另一台设备上删除，已从当前书架移除。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Button(onClick = onBack, modifier = Modifier.padding(top = 20.dp)) {
+                Text("返回书架")
             }
         }
     }

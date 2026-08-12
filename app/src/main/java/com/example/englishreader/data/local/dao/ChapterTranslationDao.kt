@@ -20,4 +20,8 @@ interface ChapterTranslationDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: ChapterTranslation)
+
+    /** 删除书籍时一并移除其私有译文缓存，避免遗留正文片段。 */
+    @Query("DELETE FROM chapter_translations WHERE itemId = :itemId")
+    suspend fun deleteForBook(itemId: Long)
 }

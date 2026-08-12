@@ -52,7 +52,7 @@ class DictionaryImporter(private val context: Context) {
     // ---------------- JSON ----------------
 
     private fun parseJson(text: String): List<DictionaryEntry> {
-        val arr = JSONArray(text.removePrefix("﻿"))
+        val arr = JSONArray(text.removePrefix("\uFEFF"))
         val out = ArrayList<DictionaryEntry>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
@@ -76,7 +76,7 @@ class DictionaryImporter(private val context: Context) {
     // ---------------- CSV ----------------
 
     private fun parseCsv(text: String): List<DictionaryEntry> {
-        val rows = parseCsvRows(text.removePrefix("﻿"))
+        val rows = parseCsvRows(text.removePrefix("\uFEFF"))
         if (rows.isEmpty()) return emptyList()
 
         val header = rows[0].map { it.trim().lowercase() }

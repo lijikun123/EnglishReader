@@ -75,6 +75,14 @@ class LibraryViewModel(
         _pendingImport.value = null
     }
 
+    /** 本机先删除；若已登录同步账号，仓库会在后台安全传播删除标记。 */
+    fun delete(item: ReadingItem) {
+        viewModelScope.launch {
+            readingRepository.delete(item)
+            _message.value = "已删除《${item.title}》"
+        }
+    }
+
     fun consumeMessage() {
         _message.value = null
     }

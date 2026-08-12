@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -91,7 +92,12 @@ class ReaderViewModel(
     private val phraseRepository: PhraseRepository,
 ) : ViewModel() {
 
+    private val _readingItemLoaded = MutableStateFlow(false)
+    /** Distinguishes initial database loading from a locally/remotely deleted book. */
+    val readingItemLoaded: StateFlow<Boolean> = _readingItemLoaded.asStateFlow()
+
     val readingItem: StateFlow<ReadingItem?> = readingRepository.observeById(readingItemId)
+        .onEach { _readingItemLoaded.value = true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val readingSettings: StateFlow<ReadingSettings> = settingsRepository.readingSettings

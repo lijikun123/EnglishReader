@@ -5,9 +5,13 @@ import com.example.englishreader.data.importer.ParsedChapter
 import com.example.englishreader.data.importer.ParsedTocItem
 import com.example.englishreader.data.local.AppDatabase
 import com.example.englishreader.data.local.dao.ChapterMeta
+import com.example.englishreader.data.local.dao.ChapterPhraseDao
+import com.example.englishreader.data.local.dao.ChapterTranslationDao
+import com.example.englishreader.data.local.dao.LookupHistoryDao
 import com.example.englishreader.data.local.dao.ReadingChapterDao
 import com.example.englishreader.data.local.dao.ReadingItemDao
 import com.example.englishreader.data.local.dao.ReadingTocItemDao
+import com.example.englishreader.data.local.dao.VocabularyDao
 import com.example.englishreader.data.local.entity.BookFormat
 import com.example.englishreader.data.local.entity.ContentType
 import com.example.englishreader.data.local.entity.ReadingChapter
@@ -20,6 +24,10 @@ class ReadingRepository(
     private val dao: ReadingItemDao,
     private val chapterDao: ReadingChapterDao,
     private val tocDao: ReadingTocItemDao,
+    private val chapterTranslationDao: ChapterTranslationDao,
+    private val chapterPhraseDao: ChapterPhraseDao,
+    private val lookupHistoryDao: LookupHistoryDao,
+    private val vocabularyDao: VocabularyDao,
     private val database: AppDatabase,
     private val syncMutationWriter: SyncMutationWriter? = null,
 ) {
@@ -129,6 +137,18 @@ class ReadingRepository(
 
     suspend fun delete(item: ReadingItem) = database.withTransaction {
         syncMutationWriter?.onBookDeleted(item.id)
+        clearBookRelatedData(item.id)
         dao.delete(item)
+    }
+
+    /**
+     * 章节与目录有外键级联；这些表没有外键，因为它们是可独立淘汰的缓存/历史，
+     * 因此删除书籍时显式清理或解除引用。已收藏的生词保留，方便继续复习。
+     */
+    private suspend fun clearBookRelatedData(bookId: Long) {
+        chapterTranslationDao.deleteForBook(bookId)
+        chapterPhraseDao.deleteForBook(bookId)
+        lookupHistoryDao.clearBookReference(bookId)
+        vocabularyDao.clearBookReference(bookId)
     }
 }

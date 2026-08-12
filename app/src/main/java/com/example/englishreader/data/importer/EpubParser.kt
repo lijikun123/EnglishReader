@@ -297,7 +297,7 @@ class EpubParser {
         val raw = Regex("<h[1-6][^>]*>(.*?)</h[1-6]>", opts).find(html)?.groupValues?.get(1)
             ?: Regex("<title[^>]*>(.*?)</title>", opts).find(html)?.groupValues?.get(1)
         // 去掉图片占位符 ￼(U+FFFC) 与 BOM，避免标题里出现「方块/OBJ」
-        return raw?.let { fromHtml(it) }?.replace("￼", "")?.replace("﻿", "")?.trim()?.takeIf { it.isNotBlank() }
+        return raw?.let { fromHtml(it) }?.replace("￼", "")?.replace("\uFEFF", "")?.trim()?.takeIf { it.isNotBlank() }
     }
 
     // 锚点标记用私有区字符包裹 id，Html.fromHtml 会原样保留为文本，便于事后定位再剔除。
@@ -322,7 +322,7 @@ class EpubParser {
             // 去掉图片/对象占位符（OBJECT REPLACEMENT CHARACTER）与 BOM，
             // 这样「仅含封面图片」的页面会变成空白 → 被当作非正文章节跳过。
             .replace("￼", "")
-            .replace("﻿", "")
+            .replace("\uFEFF", "")
             .replace("\r\n", "\n")
             .replace("\r", "\n")
             .replace(Regex("[ \\t\\u00A0]+"), " ")

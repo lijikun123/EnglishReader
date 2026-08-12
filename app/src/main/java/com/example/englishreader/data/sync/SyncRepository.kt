@@ -3,11 +3,15 @@ package com.example.englishreader.data.sync
 import android.os.Build
 import androidx.room.withTransaction
 import com.example.englishreader.data.local.AppDatabase
+import com.example.englishreader.data.local.dao.ChapterPhraseDao
+import com.example.englishreader.data.local.dao.ChapterTranslationDao
+import com.example.englishreader.data.local.dao.LookupHistoryDao
 import com.example.englishreader.data.local.dao.ReadingChapterDao
 import com.example.englishreader.data.local.dao.ReadingItemDao
 import com.example.englishreader.data.local.dao.ReadingTocItemDao
 import com.example.englishreader.data.local.dao.SyncBookDao
 import com.example.englishreader.data.local.dao.SyncOutboxDao
+import com.example.englishreader.data.local.dao.VocabularyDao
 import com.example.englishreader.data.local.entity.BookFormat
 import com.example.englishreader.data.local.entity.ContentType
 import com.example.englishreader.data.local.entity.ReadingChapter
@@ -92,6 +96,10 @@ class SyncRepository(
     private val readingItemDao: ReadingItemDao,
     private val chapterDao: ReadingChapterDao,
     private val tocDao: ReadingTocItemDao,
+    private val chapterTranslationDao: ChapterTranslationDao,
+    private val chapterPhraseDao: ChapterPhraseDao,
+    private val lookupHistoryDao: LookupHistoryDao,
+    private val vocabularyDao: VocabularyDao,
     private val syncBookDao: SyncBookDao,
     private val outboxDao: SyncOutboxDao,
     private val settingsRepository: SyncSettingsRepository,
@@ -861,10 +869,19 @@ class SyncRepository(
         if (localId != null) {
             val item = readingItemDao.getById(localId)
             if (item != null) {
+                clearBookRelatedData(localId)
                 readingItemDao.delete(item)
             }
         }
         syncBookDao.markDeleted(mapping.clientBookId)
+    }
+
+    /** Mirrors local deletion so a remote tombstone does not leave book-specific AI caches behind. */
+    private suspend fun clearBookRelatedData(bookId: Long) {
+        chapterTranslationDao.deleteForBook(bookId)
+        chapterPhraseDao.deleteForBook(bookId)
+        lookupHistoryDao.clearBookReference(bookId)
+        vocabularyDao.clearBookReference(bookId)
     }
 
     private suspend fun applyRemoteProgressLocked(change: SyncChange) {

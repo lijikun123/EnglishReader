@@ -29,4 +29,8 @@ interface VocabularyDao {
 
     @Delete
     suspend fun delete(item: VocabularyItem)
+
+    /** 生词本保留来源书名和原句，只移除已删除书籍的本地关联。 */
+    @Query("UPDATE vocabulary_items SET sourceReadingItemId = NULL WHERE sourceReadingItemId = :readingItemId")
+    suspend fun clearBookReference(readingItemId: Long)
 }

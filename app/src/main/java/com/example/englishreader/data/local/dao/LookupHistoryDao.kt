@@ -14,4 +14,8 @@ interface LookupHistoryDao {
 
     @Insert
     suspend fun insert(history: LookupHistory)
+
+    /** 保留查词历史，但不再把它关联到已删除的本地书籍。 */
+    @Query("UPDATE lookup_history SET readingItemId = NULL WHERE readingItemId = :readingItemId")
+    suspend fun clearBookReference(readingItemId: Long)
 }

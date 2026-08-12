@@ -17,12 +17,17 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -60,6 +65,7 @@ fun LibraryScreen(
     val items by viewModel.items.collectAsStateWithLifecycle()
     val pendingImport by viewModel.pendingImport.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    var pendingDeletion by remember { mutableStateOf<ReadingItem?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -104,7 +110,11 @@ fun LibraryScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(items, key = { it.id }) { item ->
-                    LibraryCard(item = item, onClick = { onOpenReader(item.id) })
+                    LibraryCard(
+                        item = item,
+                        onClick = { onOpenReader(item.id) },
+                        onDeleteRequest = { pendingDeletion = item },
+                    )
                 }
             }
         }
@@ -115,6 +125,17 @@ fun LibraryScreen(
             pending = pending,
             onConfirm = { title, author, type -> viewModel.confirmImport(title, author, type) },
             onDismiss = { viewModel.cancelImport() },
+        )
+    }
+
+    pendingDeletion?.let { item ->
+        DeleteBookDialog(
+            item = item,
+            onConfirm = {
+                viewModel.delete(item)
+                pendingDeletion = null
+            },
+            onDismiss = { pendingDeletion = null },
         )
     }
 }
@@ -198,7 +219,12 @@ private fun ImportDialog(
 }
 
 @Composable
-private fun LibraryCard(item: ReadingItem, onClick: () -> Unit) {
+private fun LibraryCard(
+    item: ReadingItem,
+    onClick: () -> Unit,
+    onDeleteRequest: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -217,7 +243,27 @@ private fun LibraryCard(item: ReadingItem, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).padding(end = 8.dp),
                 )
-                ContentTypeChip(item.contentType)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ContentTypeChip(item.contentType)
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("删除") },
+                                leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDeleteRequest()
+                                },
+                            )
+                        }
+                    }
+                }
             }
 
             if (item.author.isNotBlank()) {
@@ -267,6 +313,30 @@ private fun LibraryCard(item: ReadingItem, onClick: () -> Unit) {
 }
 
 @Composable
+private fun DeleteBookDialog(
+    item: ReadingItem,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("删除书籍？") },
+        text = {
+            Text(
+                "《${item.title}》的正文、阅读进度和本地 AI 缓存会被删除。" +
+                    "已收藏的生词会保留。若已开启同步，下一次同步会同时从其它设备移除这本书。",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("删除") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+@Composable
 private fun ContentTypeChip(type: ContentType) {
     val label = if (type == ContentType.NOVEL) "Novel" else "Article"
     SuggestionChip(
@@ -279,7 +349,7 @@ private fun ContentTypeChip(type: ContentType) {
 private fun EmptyLibrary(modifier: Modifier) {
     Box(modifier, contentAlignment = Alignment.Center) {
         Text(
-            text = "书架还是空的\n点击右下角「导入文件」导入 TXT / Markdown / EPUB\n（示例内容也会在首次启动时自动写入）",
+            text = "书架还是空的\n点击右下角「导入文件」导入 TXT / Markdown / EPUB",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
