@@ -215,7 +215,11 @@ class SyncRepository(
             // After a fresh foreground sync has completed, restore the regular
             // periodic schedule. Login deliberately cancels legacy work first so
             // no worker can carry an old access token into the new account.
-            if (result == SyncRunResult.Success) scheduler.ensurePeriodic()
+            when (result) {
+                SyncRunResult.Success -> scheduler.ensurePeriodic()
+                is SyncRunResult.RetryableFailure -> scheduler.enqueueSoon()
+                else -> Unit
+            }
         }
     }
 
@@ -404,10 +408,12 @@ class SyncRepository(
 
     private fun userVisibleSyncError(error: Throwable): String {
         val message = error.message?.takeIf { it.isNotBlank() } ?: "同步暂时失败"
-        return if (message.contains("connection closed", ignoreCase = true)) {
-            "同步连接被关闭。若平板开启了 Clash/代理，请将同步服务器设为 DIRECT 后重试。"
-        } else {
-            message
+        return when {
+            message.contains("connection closed", ignoreCase = true) ->
+                "同步连接被关闭，将自动重试。若开启了 Clash/代理，请确认它没有拦截同步服务器。"
+            message.contains("timeout", ignoreCase = true) ->
+                "同步网络响应超时，已安排自动重试。"
+            else -> message
         }
     }
 
