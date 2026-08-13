@@ -329,10 +329,32 @@ class KreaderDatabase private constructor(
     fun changesAfter(userId: UUID, cursor: Long, limit: Int): ChangePage = withConnection { connection ->
         val changes = connection.prepareStatement(
             """
-            SELECT cursor, kind, entity_id, revision, payload::text AS payload, occurred_at, server_updated_at
-            FROM sync_changes
-            WHERE user_id = ? AND cursor > ?
-            ORDER BY cursor ASC
+            SELECT
+                change_row.cursor,
+                CASE
+                    -- A device which starts at cursor 0 can encounter an old
+                    -- bundle-ready event before a later delete or content update.
+                    -- Do not let it download a bundle that is no longer the
+                    -- current live bundle; keep its cursor so the later change
+                    -- (especially book.delete) is still applied.
+                    WHEN change_row.kind = 'book.bundle_ready' AND NOT EXISTS (
+                        SELECT 1
+                        FROM books AS book
+                        WHERE book.id = change_row.entity_id
+                          AND book.user_id = change_row.user_id
+                          AND book.deleted_at IS NULL
+                          AND book.content_sha256 = change_row.payload->>'contentSha256'
+                    ) THEN 'book.bundle_stale'
+                    ELSE change_row.kind
+                END AS kind,
+                change_row.entity_id,
+                change_row.revision,
+                change_row.payload::text AS payload,
+                change_row.occurred_at,
+                change_row.server_updated_at
+            FROM sync_changes AS change_row
+            WHERE change_row.user_id = ? AND change_row.cursor > ?
+            ORDER BY change_row.cursor ASC
             LIMIT ?
             """.trimIndent(),
         ).use { statement ->
