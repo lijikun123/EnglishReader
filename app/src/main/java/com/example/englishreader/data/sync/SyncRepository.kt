@@ -23,6 +23,7 @@ import com.example.englishreader.data.local.entity.SyncOutboxKind
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +37,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.put
+import java.io.IOException
 import java.util.UUID
 
 sealed interface SyncRunResult {
@@ -725,7 +727,13 @@ class SyncRepository(
         var cursor = settingsRepository.current().pullCursor
         var hasMore: Boolean
         do {
-            val page = api.pull(configuration.serverUrl, session.accessToken, cursor)
+            // `body()` is part of SyncApi.pull(), so this retries a stalled
+            // response-body read as well as a failed connection. It is only used
+            // for GET endpoints; mutations and refresh-token rotation are never
+            // replayed implicitly.
+            val page = retrySyncRead {
+                api.pull(configuration.serverUrl, session.accessToken, cursor)
+            }
             for (change in page.changes) {
                 when (change.kind) {
                     SyncOutboxKind.BOOK_UPSERT -> database.withTransaction { saveRemoteBookMetadataLocked(change) }
@@ -739,6 +747,16 @@ class SyncRepository(
             hasMore = page.hasMore
         } while (hasMore)
     }
+
+    /**
+     * Retries complete read calls, including body decoding, on a fresh HTTP/1.1
+     * connection. The read endpoints do not mutate server state and the local
+     * cursor only moves after a change has been applied successfully.
+     */
+    private suspend fun <T> retrySyncRead(request: suspend () -> T): T = retrySyncRead(
+        delayBetweenAttempts = { delay(it) },
+        request = request,
+    )
 
     private suspend fun saveRemoteBookMetadataLocked(change: SyncChange) {
         val remote = ApiJson.decodeFromJsonElement<RemoteBookPayload>(change.payload)
@@ -784,7 +802,9 @@ class SyncRepository(
             }
             return
         }
-        val raw = api.downloadBundle(configuration.serverUrl, session.accessToken, ready.bookId)
+        val raw = retrySyncRead {
+            api.downloadBundle(configuration.serverUrl, session.accessToken, ready.bookId)
+        }
         if (raw.size.toLong() != ready.contentBytes || BookBundleCodec.sha256(raw) != ready.contentSha256) {
             throw SyncDataException("下载的书籍内容校验失败")
         }
@@ -972,3 +992,32 @@ class SyncRepository(
         val STALE_BUNDLE_CODES = setOf("bundle_stale", "book_deleted")
     }
 }
+
+/**
+ * Retries only read-side transport failures. The request lambda must not have
+ * side effects: authentication, mutations, and bundle uploads deliberately do
+ * not use this helper.
+ */
+internal suspend fun <T> retrySyncRead(
+    maxAttempts: Int = SYNC_READ_MAX_ATTEMPTS,
+    delayBetweenAttempts: suspend (Long) -> Unit = { delay(it) },
+    request: suspend () -> T,
+): T {
+    require(maxAttempts > 0) { "maxAttempts must be positive" }
+    var attempt = 1
+    var lastFailure: IOException? = null
+    while (attempt <= maxAttempts) {
+        try {
+            return request()
+        } catch (error: IOException) {
+            lastFailure = error
+            if (attempt == maxAttempts) break
+            delayBetweenAttempts(attempt * SYNC_READ_RETRY_DELAY_MILLIS)
+            attempt += 1
+        }
+    }
+    throw checkNotNull(lastFailure)
+}
+
+internal const val SYNC_READ_MAX_ATTEMPTS = 3
+private const val SYNC_READ_RETRY_DELAY_MILLIS = 500L

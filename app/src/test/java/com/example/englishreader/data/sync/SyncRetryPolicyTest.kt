@@ -1,25 +1,42 @@
 package com.example.englishreader.data.sync
 
-import io.ktor.http.HttpMethod
-import io.ktor.http.HttpStatusCode
 import java.io.IOException
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Test
 
 class SyncRetryPolicyTest {
 
     @Test
-    fun `retries transport errors only for safe GET requests`() {
-        assertTrue(shouldRetrySyncRead(HttpMethod.Get, IOException("socket stalled")))
-        assertFalse(shouldRetrySyncRead(HttpMethod.Post, IOException("socket stalled")))
-        assertFalse(shouldRetrySyncRead(HttpMethod.Get, IllegalStateException("bad payload")))
+    fun `retries a complete read after transport failures`() = runBlocking {
+        var calls = 0
+
+        val response = retrySyncRead(
+            maxAttempts = 3,
+            delayBetweenAttempts = {},
+        ) {
+            calls += 1
+            if (calls < 3) throw IOException("response stalled")
+            "synced"
+        }
+
+        assertEquals("synced", response)
+        assertEquals(3, calls)
     }
 
     @Test
-    fun `retries server errors only for safe GET requests`() {
-        assertTrue(shouldRetrySyncReadResponse(HttpMethod.Get, HttpStatusCode.ServiceUnavailable))
-        assertFalse(shouldRetrySyncReadResponse(HttpMethod.Post, HttpStatusCode.ServiceUnavailable))
-        assertFalse(shouldRetrySyncReadResponse(HttpMethod.Get, HttpStatusCode.BadRequest))
+    fun `does not replay a read for non transport failures`() = runBlocking {
+        var calls = 0
+
+        try {
+            retrySyncRead(maxAttempts = 3, delayBetweenAttempts = {}) {
+                calls += 1
+                throw IllegalStateException("invalid response")
+            }
+            fail("Expected the non-transport error")
+        } catch (_: IllegalStateException) {
+            assertEquals(1, calls)
+        }
     }
 }

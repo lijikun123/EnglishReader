@@ -3,7 +3,6 @@ package com.example.englishreader.data.sync
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.android.Android
-import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -17,13 +16,11 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
-import java.io.IOException
 
 class SyncApiException(
     val status: HttpStatusCode,
@@ -36,20 +33,6 @@ class SyncApi(
     private val client: HttpClient = HttpClient(Android) {
         install(ContentNegotiation) {
             json(ApiJson)
-        }
-        // A mobile network can lose a response after the server has already
-        // completed a read-only request. Retrying GETs is safe: no server state
-        // changes, and the sync cursor advances only after local application.
-        // Do not retry POST/PUT here: refresh-token rotation and mutations need
-        // their own explicit idempotency rules.
-        install(HttpRequestRetry) {
-            retryOnExceptionIf(maxRetries = 2) { request, cause ->
-                shouldRetrySyncRead(request.method, cause)
-            }
-            retryIf(maxRetries = 2) { request, response ->
-                shouldRetrySyncReadResponse(request.method, response.status)
-            }
-            delayMillis { retry -> retry * 500L }
         }
         install(HttpTimeout) {
             connectTimeoutMillis = 15_000
@@ -95,11 +78,11 @@ class SyncApi(
     suspend fun pull(baseUrl: String, accessToken: String, cursor: Long): SyncPullResponse =
         client.get("${baseUrl.normalized()}/v1/sync/pull") {
             bearer(accessToken)
+            header(HttpHeaders.Connection, "close")
             parameter("cursor", cursor)
             parameter("limit", 100)
-            // Fail a stalled socket promptly and allow the GET-only retry policy
-            // above to establish a fresh connection instead of making the UI wait
-            // for the full bundle-transfer timeout.
+            // Fail a stalled socket promptly. SyncRepository retries this whole
+            // read call (including body decoding) on a fresh connection.
             timeout { requestTimeoutMillis = PULL_TIMEOUT_MILLIS }
         }.requireSuccess().body()
 
@@ -121,6 +104,7 @@ class SyncApi(
     suspend fun downloadBundle(baseUrl: String, accessToken: String, cloudBookId: String): ByteArray =
         client.get("${baseUrl.normalized()}/v1/books/$cloudBookId/bundle") {
             bearer(accessToken)
+            header(HttpHeaders.Connection, "close")
         }.requireSuccess().body()
 
     fun close() = client.close()
@@ -155,11 +139,3 @@ val ApiJson = Json {
     explicitNulls = false
     encodeDefaults = true
 }
-
-/** GET sync requests do not change server state and can safely use a fresh socket. */
-internal fun shouldRetrySyncRead(method: HttpMethod, cause: Throwable): Boolean =
-    method == HttpMethod.Get && cause is IOException
-
-/** Retrying a transient server-side response is safe only for sync reads. */
-internal fun shouldRetrySyncReadResponse(method: HttpMethod, status: HttpStatusCode): Boolean =
-    method == HttpMethod.Get && status.value in 500..599
