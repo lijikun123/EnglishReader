@@ -1,75 +1,77 @@
-# KReader（Kyan's Reader · 英文阅读 App）— v0.1.18
+# KReader（Kyan's Reader · 英文阅读 App）— v0.1.21
 
-面向**中文母语英语学习者**的本地英文阅读 App：舒服地读英文小说 / 外刊，遇到生词随手查中文释义、收藏到生词本，再导出到 Anki 复习。支持分页阅读、触摸/滑动翻页。
+面向中文母语英语学习者的 Android 英文阅读器：以阅读体验为先，支持本地导入、查词、AI 辅助、生词本，以及手机与平板之间的自建同步。
 
-> 定位：这不是词典 App，而是**阅读体验优先**的阅读 App。查词、生词本、导出、AI 都是辅助。默认本地优先；可选地用自建账号服务同步书架与阅读进度。
+> 默认是本地优先：所有阅读操作先写入本机 Room 数据库；已登录同步账号时，书籍与进度会在网络可用后同步到私有服务。
 
-- 技术栈：Kotlin · Coroutines/Flow · Jetpack Compose · Material 3 · Navigation Compose · Room · DataStore · MVVM + Repository · 手机/平板自适应（WindowSizeClass）
-- `minSdk 24`，`compileSdk / targetSdk 36`，AGP 8.13 / Kotlin 2.2 / Compose BOM 2026.05
-- 版本：`0.1.18`（versionCode 18）；applicationId 仍为 `com.example.englishreader`（未改，保留已安装数据）
+- 技术栈：Kotlin · Coroutines/Flow · Jetpack Compose · Material 3 · Navigation Compose · Room · DataStore · WorkManager · MVVM + Repository
+- `minSdk 24`，`compileSdk / targetSdk 36`，Java 17
+- 当前版本：`0.1.21`（versionCode 21）
+- applicationId：`com.example.englishreader`（为保留已安装用户的数据而未更改）
 
----
+## 已实现功能
 
-## v0.1 已实现功能（真实可用）
+### 阅读与导入
 
-**跨设备同步（测试版）**
-- Android 手机/平板可登录同一自建账号，同步书架、TXT/Markdown/无 DRM EPUB 内容与阅读位置
-- 本地数据库仍是阅读界面的唯一数据源；离线写入先落到本机队列，联网后由 WorkManager 自动重试
-- 不同步 AI Key、AI/词典缓存、主题、字号或阅读排版设置；刷新令牌经过 Android Keystore 加密且不进入系统备份
-- 同一内容在两台设备重复导入会合并为一个云端书籍；进度按最后一次明确阅读位置合并
-- 服务端源码在 [`server/`](server/)；上线前先创建自己的 HTTPS 域名路径，并保持公开注册关闭
+- 导入本地 **TXT / Markdown / EPUB**（仅无 DRM）；书架显示标题、作者、格式、阅读进度与最近阅读时间。
+- EPUB 解析 spine 章节、书名/作者和目录；支持 EPUB3 `nav.xhtml`、EPUB2 `toc.ncx`、章节标题回退与 fragment 段落锚点。
+- 页内点击/滑动翻页；EPUB 翻到章节边缘会连续进入上一章或下一章，并保留正确阅读位置。
+- 阅读设置包括字号、行距、阅读宽度和浅色 / 深色 / 护眼主题；设置与进度均会持久化，重启后恢复。
+- 手机使用全屏阅读和底部面板；平板/宽屏使用正文与词典并排布局。
 
-**阅读**
-- 导入本地 **TXT / Markdown / EPUB**（无 DRM）文件并入库，书架显示书名、作者、格式、整本进度、上次时间
-- EPUB：解析书名/作者、按 spine 分章、XHTML→纯文本（保留段落、去脚本/样式/图片占位）
-- EPUB 目录：优先用电子书自带 **EPUB3 `nav.xhtml`** 或 **EPUB2 `toc.ncx`**（按层级缩进、当前章高亮、点击跳转）；无目录时回退到 spine + `h1~h6`
-- EPUB **fragment 精确锚点**：目录项 `chapter.xhtml#id` 可跳到章节内对应段落附近，找不到则回退章节开头
-- 上一章 / 下一章；阅读进度（含 EPUB 当前章节 + 章节内位置）自动保存，重启恢复
-- 阅读设置（字号 / 行距 / 段落间距 / 阅读宽度 / 主题 light·dark·sepia）经 DataStore 实时生效并持久化
-- 手机：全屏阅读 + 底部弹窗；平板/宽屏：左正文 + 右词典面板
+### 查词、AI 与词组
 
-**查词 / 词典**
-- 点击正文英文单词 → 查词弹窗，**优先中文释义** + 音标/词性/英文释义/例句；查不到提示「本地词典暂未收录」
-- 内置示例中英文词典；可在「设置 → 词典设置」**导入 CSV / JSON 中英文词典**（导入词条覆盖同名词、优先于内置）
-- 查询忽略大小写 + 朴素词形还原回退（ies/es/s/ing/ed）
+- 点击正文英文单词查询本地词典，展示中文释义、音标、词性、英文释义和例句；支持 CSV / JSON 自定义词典导入与基础词形回退。
+- 支持 OpenAI-compatible Chat Completions，默认配置面向 DeepSeek；可进行语境释义、翻译、语法、长难句拆解和精读。
+- AI Key、Base URL、模型和提示词由用户在“设置 → AI”自行配置。Key 使用 Android Keystore 本地保护，**不会上传或参与同步**。
+- 支持双语段落阅读与 AI 词组识别；译文和词组分析在本机缓存。
 
-**生词本 / 导出**
-- 收藏生词（带音标/词性/释义/例句/原句/来源书名/章节/备注）
-- 生词本一键**导出 Anki TSV**（见下方格式）
+### 生词本与 Anki
 
----
+- 可收藏单词和 AI 识别的词组，保存释义、例句、原句、来源书籍/章节和备注。
+- 同一词或词组在同一设备只保留一条规范化记录，避免重复收藏。
+- 生词本使用列表布局，支持选择、全选、批量删除和批量分享。
+- 通过系统分享面板导出 UTF-8 Anki TSV；关闭分享面板会直接回到生词本，而不会进入文件管理器层级。
 
-## 暂未实现（按规划刻意不做）
+### 跨设备同步（测试版）
 
-- ⛔ 真实 AI 接口：阅读器四个按钮（解释词义/翻译/语法/精读）目前是 **Stub 占位**（不联网，弹窗明确标注「占位实现」）；API Key 输入框已就绪、仅本地保存、不上传、不硬编码
-- ⛔ PDF / AZW3 / MOBI / KFX 等格式
-- ⛔ MDX / StarDict 词典格式
-- ⛔ SRS 背单词算法（`familiarity` 字段已预留）
-- ⛔ 复杂词典管理（清空/编辑）、EPUB 富渲染（CSS/图片/脚注/公式）、TOC 小节级高亮
+- Android 手机与平板登录同一账号后，可同步书架、解析后的 TXT / Markdown / 无 DRM EPUB 内容、阅读位置及书籍删除操作。
+- 本地操作先进入可重试、幂等的 outbox；联网时自动同步，WorkManager 另有约 15 分钟一次的兜底同步。设置页可手动“立即同步”。
+- 同一内容在两台设备重复导入时，按内容 SHA-256 合并为同一云端书籍。
+- 进度与书籍变更按最近一次操作时间合并；时间相同时由设备 ID 稳定打破平局。
+- 同步读取遇到短暂网络中断会自动重试；手动同步失败也会进入后台重试队列。
+- 删除已同步书籍后，其他设备下次同步会从书架移除它；服务端保留删除标记，以便离线设备也能收到这条删除通知。
+- **不参与同步**：生词本、词典、AI/翻译/词组缓存、AI Key、主题和排版设置。删除书籍不会删除已收藏的生词，只会清除其本地书籍关联。
 
----
+## 同步使用说明
 
-## 支持的文件格式
+1. 在第一台设备的“设置 → 跨设备同步”填写自己的 HTTPS 同步服务地址，并注册账号。
+2. 在另一台设备填写相同服务地址，使用同一账号**登录**（不要重复注册）。
+3. 首次同步可能需要上传/下载书籍内容；之后阅读、导入和删除都会自动排队同步，也可在设置页点“立即同步”。
+
+服务端默认关闭公开注册（`KREADER_ALLOW_REGISTRATION=false`）。私有部署时，只在创建第一个账号的短时间内开启注册，随后立即关闭。项目内置的默认地址属于项目所有者的私有服务，不应视为公共服务；自行部署时请使用自己的 HTTPS 域名地址。
+
+## 支持的格式
 
 | 用途 | 格式 | 入口 |
 |---|---|---|
-| 阅读内容 | `.txt` `.md` / `.markdown` `.epub`（无 DRM） | 书架右下角「导入文件」 |
-| 词典 | `.csv` `.json`（UTF-8） | 设置 → 词典设置 → 导入词典 |
-| 导出 | `.tsv`（Anki） | 生词本右上角分享图标 |
-
----
+| 阅读内容 | `.txt`、`.md`、`.markdown`、`.epub`（无 DRM） | 书架右下角“导入文件” |
+| 词典 | `.csv`、`.json`（UTF-8） | 设置 → 词典设置 → 导入词典 |
+| 生词导出 | `.tsv`（Anki） | 生词本 → 选择 → 分享 |
 
 ## 词典 CSV / JSON 格式
 
-字段：`word`（必填）`lemma` `phonetic` `partOfSpeech` `chineseMeaning` `englishDefinition` `exampleSentence`。UTF-8；`word`/`lemma` 存储为小写以忽略大小写；同名 `word` 后导入覆盖先前。
+字段：`word`（必填）、`lemma`、`phonetic`、`partOfSpeech`、`chineseMeaning`、`englishDefinition`、`exampleSentence`。UTF-8 编码；`word` / `lemma` 会按小写检索；同名词条以后导入者覆盖先前词条。
 
-**CSV**（首行为表头，列名忽略大小写匹配；支持双引号包裹含逗号/换行的字段）：
+CSV 首行为表头，列名忽略大小写，支持含逗号/换行的双引号字段：
+
 ```csv
 word,lemma,phonetic,partOfSpeech,chineseMeaning,englishDefinition,exampleSentence
 considering,consider,/kənˈsɪdərɪŋ/,prep./conj.,考虑到；鉴于,"used to show a fact is taken into account",Considering the circumstances, he did well.
 ```
 
-**JSON**（对象数组）：
+JSON 为对象数组：
+
 ```json
 [
   {
@@ -84,95 +86,64 @@ considering,consider,/kənˈsɪdərɪŋ/,prep./conj.,考虑到；鉴于,"used to
 ]
 ```
 
----
-
 ## Anki TSV 导出格式
 
-- 每张卡片一行，`Front<TAB>Back`，**无表头**，UTF-8
-- 正面：单词；背面：用 HTML `<br>` 连接的若干段
-- 字段中的 tab/换行会被清洗成空格，避免 Anki 错列；空字段自动跳过；中文释义为空时回退导入词典，仍为空显示「暂无释义」
+- 每张卡片一行，`Front<TAB>Back`，无表头、UTF-8。
+- 正面为单词或词组；背面使用 HTML `<br>` 连接词性、中文释义、英文释义、例句、原句、来源与备注。
+- 字段内的 tab / 换行会被清理，避免 Anki 错列；中文释义为空时会回退词典结果，仍为空则显示“暂无释义”。
 
-背面顺序：`【词性】中文释义` → `English definition: …` → `Example: …` → `原句：…` → `来源：书名 - 章节` → `备注：…`
+Anki 导入时选择 Tab 分隔符，映射 Front / Back，并启用“允许 HTML”。
 
-示例（一行，制表符用 ⇥ 表示）：
-```
-fortune⇥【n.】财富；运气<br>English definition: chance or luck, especially in the way it affects life<br>Example: She had the good fortune to meet him.<br>来源：Alice's Adventures in Wonderland - Chapter I<br>备注：重点
-```
-Anki 导入：Import → 分隔符选 Tab、字段映射 Front/Back、勾选「允许 HTML」。
+## 本地开发与 APK
 
----
+使用 Android Studio（Ladybug 或更新）打开本目录；首次 Gradle 同步时如提示缺少 SDK Platform 36，按提示安装即可。
 
-## 如何在 Android Studio 运行
-
-1. 用 **Android Studio（Ladybug 或更新）** 打开本目录
-2. 首次会自动 Gradle 同步；如提示缺 **SDK Platform 36**，点一下安装
-3. 选模拟器或连真机，点 ▶️ Run
-
-命令行（已含 Gradle wrapper）：
 ```bash
+# 构建 Debug APK
 ./gradlew :app:assembleDebug
+
+# 运行单元测试
+./gradlew :app:testDebugUnitTest
 ```
-> `local.properties`（指向本机 SDK）是机器相关文件，已被 git 忽略，由 Android Studio 自动生成。
 
----
+Debug APK 路径：`app/build/outputs/apk/debug/app-debug.apk`。
 
-## 如何生成 / 安装 APK
+USB 安装：在手机启用“开发者选项 → USB 调试”后运行：
 
-**Debug APK（本阶段交付物）**
 ```bash
-./gradlew :app:assembleDebug
-# 产物：app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
-安装到手机：
-- USB：手机开「开发者选项 → USB 调试」，`adb install -r app/build/outputs/apk/debug/app-debug.apk`
-- 或把 `app-debug.apk` 传到手机，文件管理器点击安装（需允许「安装未知来源应用」）
 
-**Release / 签名 APK（后续上架时再做，本阶段不强制）**
-1. `keytool -genkey -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias er`
-2. 在 `app/build.gradle.kts` 加 `signingConfigs { release { ... } }` 并在 `buildTypes.release` 引用；建议开启 `isMinifyEnabled = true`
-3. `./gradlew :app:assembleRelease` → `app-release.apk`
-> debug APK 已可在任意手机安装自测，无需签名配置。
+`local.properties`（本机 SDK 路径）、APK、Keystore、部署 `.env` 等本地敏感或构建文件均被 Git 忽略。
 
----
+## 自建同步服务
 
-## 数据库（Room，version 8）
+服务端在 [`server/`](server/) 下，是与 Android 工程分离的 Kotlin/Ktor + PostgreSQL 项目。部署说明见 [`server/README.md`](server/README.md)。
+
+部署原则：API 仅绑定 VPS 的 loopback 地址，PostgreSQL 不暴露公网；由既有 Nginx 或可选 Caddy 提供 HTTPS 与 `/kreader-sync/` 路径代理。不要将数据库端口或 `.env` 中的密钥提交到 Git。
+
+## 数据库（Room v8）
 
 | 表 | 用途 |
 |---|---|
-| `reading_items` | 书架（标题/作者/格式/进度/当前章节/上次位置） |
-| `reading_chapters` | EPUB 章节正文（外键级联） |
-| `reading_toc_items` | EPUB 目录项（含层级 + fragment 段落锚点） |
-| `vocabulary_items` | 收藏生词（含来源书名/章节/原句/备注） |
-| `dictionary_entries` | 中英文词典（内置示例 + 导入） |
+| `reading_items` | 书架、进度、当前章节与上次位置 |
+| `reading_chapters` | EPUB 章节正文 |
+| `reading_toc_items` | EPUB 目录和 fragment 段落锚点 |
+| `vocabulary_items` | 收藏单词/词组与来源信息 |
+| `dictionary_entries` | 内置与导入词典 |
 | `lookup_history` | 查词历史 |
-| `ai_analysis_cache` | AI 分析缓存（配合 Stub） |
-| `sync_books` | 本地书籍 Long ID 与云端 UUID 的旁路映射、同步状态、暂存远端进度 |
-| `sync_outbox` | 可重试、幂等的本地同步任务队列 |
+| `ai_analysis_cache` | AI 分析缓存 |
+| `chapter_translations` | AI 段落译文缓存 |
+| `chapter_phrases` | AI 词组识别缓存 |
+| `sync_books` | 本地书籍 Long ID 与云端 UUID 的同步映射 |
+| `sync_outbox` | 可重试、幂等的同步任务队列 |
 
-> 注意：已有 v4→v8 的正式迁移；未覆盖的未知版本会显式失败，不会静默清空本地书籍。
-
----
+已有 v4→v8 正式迁移；未覆盖的版本跳变会显式失败，而不会静默清空本地书籍。
 
 ## 已知限制
 
-- EPUB 仅支持**无 DRM**、UTF-8；不渲染 CSS/图片/脚注；图片页会被跳过
-- 部分 EPUB（如 Gutenberg）一个文件含多章 + 自动生成的目录标签可能较"糙"；fragment 为段落级近似，非像素级
-- 词典/书籍整文件读入内存解析，适合常见体量（几千~几万条 / 单本小说）
-- 大小写忽略仅针对 ASCII 英文词；词形还原是朴素规则
-- AI 四按钮为占位；查词依赖已导入/内置词典，未收录的词只显示提示
-- 同步首版仅覆盖书架、内容与阅读位置；生词、词典、AI 缓存与阅读显示设置仍是本机数据
-
----
-
-## 真实 / 占位 一览
-
-| 功能 | 状态 |
-|---|---|
-| TXT / Markdown / EPUB 导入与阅读 | ✅ 真实 |
-| EPUB 目录（nav/ncx）+ fragment 锚点 + 章节导航 | ✅ 真实 |
-| 阅读设置 + 持久化 + 进度恢复 | ✅ 真实 |
-| 点词查词（内置 + CSV/JSON 导入词典） | ✅ 真实 |
-| 收藏生词 + Anki TSV 导出 | ✅ 真实 |
-| Android 手机/平板自建账号同步（书架/内容/进度） | 🟡 测试版 |
-| AI 四按钮（解释/翻译/语法/精读） | 🟡 Stub 占位（不联网，弹窗已标注） |
-| PDF / MOBI / AZW3 / MDX / StarDict / SRS | ⛔ 未做 |
+- EPUB 仅支持无 DRM 内容；不渲染原书 CSS、图片、脚注或公式。
+- PDF、AZW3、MOBI、KFX、MDX、StarDict 与 SRS 背词算法尚未实现。
+- AI 需要用户自己的兼容服务、API Key 和网络；失败结果不会写入缓存。
+- 生词本、词典和 AI 缓存目前仅保留在当前设备，尚未跨设备同步。
+- 同步服务是私有自建服务；在代理/VPN 环境下，应确保自己的同步域名不会被异常拦截。
