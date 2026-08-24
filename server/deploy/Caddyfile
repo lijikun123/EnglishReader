@@ -1,0 +1,13 @@
+{$KREADER_DOMAIN} {
+    redir /kreader-sync /kreader-sync/ permanent
+
+    handle_path /kreader-sync/* {
+        encode zstd gzip
+        request_body {
+            max_size 25MB
+        }
+        reverse_proxy api:8080
+    }
+
+    respond 404
+}

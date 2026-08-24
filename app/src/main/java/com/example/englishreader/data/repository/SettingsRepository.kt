@@ -9,7 +9,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.example.englishreader.data.model.AiSettings
 import com.example.englishreader.data.model.ReadingSettings
 import com.example.englishreader.data.model.ThemeMode
+import com.example.englishreader.data.security.AiKeyStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
@@ -17,7 +20,10 @@ import kotlinx.coroutines.flow.map
  * 设置仓库：阅读排版、词典偏好、AI 配置统一通过 DataStore 持久化。
  * 暴露为 Flow，供各 ViewModel 订阅；更新方法为 suspend。
  */
-class SettingsRepository(private val dataStore: DataStore<Preferences>) {
+class SettingsRepository(
+    private val dataStore: DataStore<Preferences>,
+    private val aiKeyStore: AiKeyStore,
+) {
 
     private object Keys {
         val FONT_SIZE = floatPreferencesKey("font_size")
@@ -54,12 +60,16 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         )
     }
 
-    val aiSettings: Flow<AiSettings> = dataStore.data.map { aiSettingsFrom(it) }
+    private val aiApiKey = MutableStateFlow(aiKeyStore.read())
 
-    private fun aiSettingsFrom(p: Preferences): AiSettings = AiSettings(
+    val aiSettings: Flow<AiSettings> = combine(dataStore.data, aiApiKey) { preferences, apiKey ->
+        aiSettingsFrom(preferences, apiKey)
+    }
+
+    private fun aiSettingsFrom(p: Preferences, apiKey: String = aiApiKey.value): AiSettings = AiSettings(
         enabled = p[Keys.AI_ENABLED] ?: false,
         provider = p[Keys.AI_PROVIDER] ?: AiSettings.DEFAULT_PROVIDER,
-        apiKey = p[Keys.AI_API_KEY] ?: "",
+        apiKey = apiKey,
         baseUrl = p[Keys.AI_BASE_URL] ?: "",
         model = p[Keys.AI_MODEL] ?: "",
         systemPrompt = p[Keys.AI_SYSTEM_PROMPT] ?: AiSettings.DEFAULT_SYSTEM_PROMPT,
@@ -104,12 +114,16 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     suspend fun updateAiSettings(transform: (AiSettings) -> AiSettings) {
-        // 在单个 edit{} 内读取-修改-写入，保证原子性：避免「开关」「填Key」等并发更新互相覆盖。
+        val updated = transform(aiSettings.first())
+        if (updated.apiKey != aiApiKey.value) {
+            aiKeyStore.save(updated.apiKey)
+            aiApiKey.value = updated.apiKey
+        }
+        // 普通 AI 设置仍在单个 edit{} 中原子更新；Key 从不写入 DataStore。
         dataStore.edit { p ->
-            val updated = transform(aiSettingsFrom(p))
             p[Keys.AI_ENABLED] = updated.enabled
             p[Keys.AI_PROVIDER] = updated.provider
-            p[Keys.AI_API_KEY] = updated.apiKey
+            p.remove(Keys.AI_API_KEY)
             p[Keys.AI_BASE_URL] = updated.baseUrl
             p[Keys.AI_MODEL] = updated.model
             p[Keys.AI_SYSTEM_PROMPT] = updated.systemPrompt
@@ -118,6 +132,18 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             p[Keys.AI_PROMPT_GRAMMAR] = updated.promptGrammar
             p[Keys.AI_PROMPT_BREAKDOWN] = updated.promptBreakdown
             p[Keys.AI_PROMPT_CLOSEREADING] = updated.promptCloseReading
+        }
+    }
+
+    /** Moves a pre-sync legacy plaintext key into Keystore on the next app start. */
+    suspend fun migrateLegacyAiKey() {
+        dataStore.edit { preferences ->
+            val legacyKey = preferences[Keys.AI_API_KEY]
+            if (aiApiKey.value.isBlank() && !legacyKey.isNullOrBlank()) {
+                aiKeyStore.save(legacyKey)
+                aiApiKey.value = legacyKey
+            }
+            preferences.remove(Keys.AI_API_KEY)
         }
     }
 }

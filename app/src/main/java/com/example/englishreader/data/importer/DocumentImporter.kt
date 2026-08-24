@@ -103,7 +103,7 @@ class DocumentImporter(private val context: Context) {
 
     /** 去掉 BOM、统一换行，方便按空行切分段落。 */
     private fun normalize(text: String): String =
-        text.removePrefix("﻿")
+        text.removePrefix("\uFEFF")
             .replace("\r\n", "\n")
             .replace("\r", "\n")
             .trim()

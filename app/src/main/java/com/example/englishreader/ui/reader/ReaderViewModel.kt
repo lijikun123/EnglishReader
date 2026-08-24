@@ -34,10 +34,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 
 /** 查词面板 UI 状态。 */
@@ -45,6 +48,14 @@ data class LookupUiState(
     val word: String,
     val sentence: String,
     val entries: List<DictionaryEntry>,
+    val saved: Boolean = false,
+)
+
+/** 词组弹窗的内容及它是否已经进入生词本。 */
+data class PhrasePopupUiState(
+    val phrase: DetectedPhrase,
+    /** 当前词组所在段落，作为复习时的上下文保存。 */
+    val sourceSentence: String,
     val saved: Boolean = false,
 )
 
@@ -70,6 +81,13 @@ data class TocEntry(
     val anchorParagraph: Int = -1,
 )
 
+/** Adjacent EPUB chapters kept ready for a cross-chapter page curl. */
+data class AdjacentChapters(
+    val forChapterIndex: Int? = null,
+    val previous: ReadingChapter? = null,
+    val next: ReadingChapter? = null,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReaderViewModel(
     private val readingItemId: Long,
@@ -82,7 +100,12 @@ class ReaderViewModel(
     private val phraseRepository: PhraseRepository,
 ) : ViewModel() {
 
+    private val _readingItemLoaded = MutableStateFlow(false)
+    /** Distinguishes initial database loading from a locally/remotely deleted book. */
+    val readingItemLoaded: StateFlow<Boolean> = _readingItemLoaded.asStateFlow()
+
     val readingItem: StateFlow<ReadingItem?> = readingRepository.observeById(readingItemId)
+        .onEach { _readingItemLoaded.value = true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val readingSettings: StateFlow<ReadingSettings> = settingsRepository.readingSettings
@@ -127,10 +150,40 @@ class ReaderViewModel(
 
     private val _chapterIndex = MutableStateFlow<Int?>(null)
 
+    /**
+     * Progress writes originate from page turns and must not race a chapter
+     * transition. A stale write from the chapter just left would otherwise put
+     * its index back into the book record (and sync that bad location).
+     */
+    private val progressWriteMutex = Mutex()
+    private val chapterTransitionMutex = Mutex()
+    private var progressGeneration = 0L
+
+    private fun invalidatePendingProgressWrites(): Long {
+        progressGeneration += 1
+        return progressGeneration
+    }
+
     val currentChapter: StateFlow<ReadingChapter?> = _chapterIndex
         .filterNotNull()
         .mapLatest { index -> readingRepository.getChapter(readingItemId, index) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * Preload only the neighbouring chapter records. ReaderScreen lays them out
+     * with the current font and viewport so a page curl can reveal the adjoining
+     * chapter instead of making the reader tap a separate chapter control.
+     */
+    val adjacentChapters: StateFlow<AdjacentChapters> = _chapterIndex
+        .filterNotNull()
+        .mapLatest { index ->
+            AdjacentChapters(
+                forChapterIndex = index,
+                previous = if (index > 0) readingRepository.getChapter(readingItemId, index - 1) else null,
+                next = readingRepository.getChapter(readingItemId, index + 1),
+            )
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AdjacentChapters())
 
     private val _lookup = MutableStateFlow<LookupUiState?>(null)
     val lookup: StateFlow<LookupUiState?> = _lookup.asStateFlow()
@@ -164,7 +217,12 @@ class ReaderViewModel(
             dictionaryRepository.recordLookup(cleaned, sentence, readingItemId)
             _aiResult.value = null
             _sentenceMenu.value = null
-            _lookup.value = LookupUiState(word = cleaned, sentence = sentence, entries = entries)
+            _lookup.value = LookupUiState(
+                word = cleaned,
+                sentence = sentence,
+                entries = entries,
+                saved = vocabularyRepository.exists(cleaned),
+            )
         }
     }
 
@@ -177,7 +235,7 @@ class ReaderViewModel(
         val state = _lookup.value ?: return
         viewModelScope.launch {
             val first = state.entries.firstOrNull()
-            vocabularyRepository.save(
+            vocabularyRepository.saveIfAbsent(
                 VocabularyItem(
                     word = state.word,
                     lemma = first?.lemma ?: state.word,
@@ -193,7 +251,8 @@ class ReaderViewModel(
                     note = note,
                 ),
             )
-            _lookup.value = state.copy(saved = true)
+            // A newer lookup may have opened while the database write was running.
+            if (_lookup.value == state) _lookup.value = state.copy(saved = true)
         }
     }
 
@@ -312,8 +371,9 @@ class ReaderViewModel(
 
     private val phraseGate = Semaphore(2)
 
-    private val _phrasePopup = MutableStateFlow<DetectedPhrase?>(null)
-    val phrasePopup: StateFlow<DetectedPhrase?> = _phrasePopup.asStateFlow()
+    private val _phrasePopup = MutableStateFlow<PhrasePopupUiState?>(null)
+    val phrasePopup: StateFlow<PhrasePopupUiState?> = _phrasePopup.asStateFlow()
+    private var phrasePopupRequestId = 0L
 
     fun setPhraseMode(on: Boolean) {
         viewModelScope.launch { settingsRepository.setPhraseMode(on) }
@@ -357,18 +417,28 @@ class ReaderViewModel(
         }
     }
 
-    fun showPhrase(phrase: DetectedPhrase) {
-        _phrasePopup.value = phrase
+    fun showPhrase(phrase: DetectedPhrase, sourceSentence: String) {
+        val requestId = ++phrasePopupRequestId
+        val initial = PhrasePopupUiState(phrase = phrase, sourceSentence = sourceSentence)
+        _phrasePopup.value = initial
+        viewModelScope.launch {
+            val saved = vocabularyRepository.exists(phrase.phrase)
+            if (requestId == phrasePopupRequestId && _phrasePopup.value == initial) {
+                _phrasePopup.value = initial.copy(saved = saved)
+            }
+        }
     }
 
     fun dismissPhrase() {
+        phrasePopupRequestId++
         _phrasePopup.value = null
     }
 
     fun savePhraseToVocabulary() {
-        val p = _phrasePopup.value ?: return
+        val popup = _phrasePopup.value ?: return
+        val p = popup.phrase
         viewModelScope.launch {
-            vocabularyRepository.save(
+            vocabularyRepository.saveIfAbsent(
                 VocabularyItem(
                     word = p.phrase,
                     lemma = p.phrase.lowercase(),
@@ -377,14 +447,14 @@ class ReaderViewModel(
                     chineseMeaning = p.explanation,
                     englishDefinition = "",
                     exampleSentence = "",
-                    sourceSentence = "",
+                    sourceSentence = popup.sourceSentence,
                     sourceReadingItemId = readingItemId,
                     sourceBookTitle = readingItem.value?.title.orEmpty(),
                     sourceChapterTitle = currentChapter.value?.title.orEmpty(),
                     note = "",
                 ),
             )
-            _phrasePopup.value = null
+            if (_phrasePopup.value == popup) _phrasePopup.value = popup.copy(saved = true)
         }
     }
 
@@ -394,25 +464,97 @@ class ReaderViewModel(
         val total = chapters.value.size
         if (total == 0) return
         val clamped = index.coerceIn(0, total - 1)
-        _pendingTarget.value = clamped to code
-        _chapterIndex.value = clamped
+        if (!chapterTransitionMutex.tryLock()) return
+        val generation = invalidatePendingProgressWrites()
         viewModelScope.launch {
-            val chapterProgress = readingRepository.getChapter(readingItemId, clamped)?.progress ?: 0f
-            readingRepository.saveBookChapterState(readingItemId, clamped, (clamped + chapterProgress) / total)
+            try {
+                progressWriteMutex.withLock {
+                    if (generation != progressGeneration) return@withLock
+                    val chapterProgress = readingRepository.getChapter(readingItemId, clamped)?.progress ?: 0f
+                    readingRepository.saveBookChapterState(readingItemId, clamped, (clamped + chapterProgress) / total)
+                    _pendingTarget.value = clamped to code
+                    _chapterIndex.value = clamped
+                }
+            } finally {
+                chapterTransitionMutex.unlock()
+            }
         }
     }
 
-    fun nextChapter() {
-        _chapterIndex.value?.let { goToChapter(it + 1, TARGET_TOP) }
+    fun nextChapter(expectedSourceIndex: Int) {
+        if (_chapterIndex.value != expectedSourceIndex) return
+        goToChapter(expectedSourceIndex + 1, TARGET_TOP)
     }
 
-    fun prevChapter() {
-        _chapterIndex.value?.let { goToChapter(it - 1, TARGET_TOP) }
+    fun prevChapter(expectedSourceIndex: Int) {
+        if (_chapterIndex.value != expectedSourceIndex) return
+        goToChapter(expectedSourceIndex - 1, TARGET_TOP)
     }
 
     /** 翻页越过章首时，进入上一章并停在其最后一页。 */
-    fun prevChapterToLastPage() {
-        _chapterIndex.value?.let { goToChapter(it - 1, TARGET_LAST_PAGE) }
+    fun prevChapterToLastPage(expectedSourceIndex: Int) {
+        if (_chapterIndex.value != expectedSourceIndex) return
+        goToChapter(expectedSourceIndex - 1, TARGET_LAST_PAGE)
+    }
+
+    /** Complete this chapter and turn directly to the following chapter's first page. */
+    fun crossToNextChapter(expectedSourceIndex: Int) {
+        val from = _chapterIndex.value ?: return
+        if (from != expectedSourceIndex) return
+        val total = chapters.value.size
+        val target = from + 1
+        if (total == 0 || target >= total) return
+        if (!chapterTransitionMutex.tryLock()) return
+        val generation = invalidatePendingProgressWrites()
+        viewModelScope.launch {
+            try {
+                progressWriteMutex.withLock {
+                    if (generation != progressGeneration || _chapterIndex.value != from) return@withLock
+                    // Store the real end offset, not the current layout's page start.
+                    // That remains correct after font/viewport changes and on another device.
+                    val finalOffset = readingRepository.getChapter(readingItemId, from)
+                        ?.content
+                        ?.let { buildChapterText(it).text.length }
+                        ?: 0
+                    readingRepository.saveChapterProgress(readingItemId, from, finalOffset, 1f)
+                    readingRepository.saveBookChapterState(readingItemId, target, target.toFloat() / total)
+                    _pendingTarget.value = target to TARGET_TOP
+                    _chapterIndex.value = target
+                }
+            } finally {
+                chapterTransitionMutex.unlock()
+            }
+        }
+    }
+
+    /** Turn directly from a chapter's first page to the prior chapter's last page. */
+    fun crossToPreviousChapter(expectedSourceIndex: Int) {
+        val from = _chapterIndex.value ?: return
+        if (from != expectedSourceIndex) return
+        val total = chapters.value.size
+        val target = from - 1
+        if (total == 0 || target < 0) return
+        if (!chapterTransitionMutex.tryLock()) return
+        val generation = invalidatePendingProgressWrites()
+        viewModelScope.launch {
+            try {
+                progressWriteMutex.withLock {
+                    if (generation != progressGeneration || _chapterIndex.value != from) return@withLock
+                    // Do not use a possibly-unready neighbouring page layout here:
+                    // the raw chapter length is the stable final reading offset.
+                    val finalOffset = readingRepository.getChapter(readingItemId, target)
+                        ?.content
+                        ?.let { buildChapterText(it).text.length }
+                        ?: 0
+                    readingRepository.saveChapterProgress(readingItemId, target, finalOffset, 1f)
+                    readingRepository.saveBookChapterState(readingItemId, target, (target + 1f) / total)
+                    _pendingTarget.value = target to TARGET_LAST_PAGE
+                    _chapterIndex.value = target
+                }
+            } finally {
+                chapterTransitionMutex.unlock()
+            }
+        }
     }
 
     // ---- 进度（页 / 字符偏移级别） ----
@@ -424,16 +566,21 @@ class ReaderViewModel(
     fun savePagedProgress(charOffset: Int, withinChapterFraction: Float) {
         val index = _chapterIndex.value
         val total = chapters.value.size
+        val generation = progressGeneration
         viewModelScope.launch {
-            if (index != null && total > 0) {
-                readingRepository.saveChapterProgress(readingItemId, index, charOffset, withinChapterFraction)
-                readingRepository.saveBookChapterState(
-                    readingItemId,
-                    index,
-                    (index + withinChapterFraction) / total,
-                )
-            } else {
-                readingRepository.saveProgress(readingItemId, charOffset, withinChapterFraction)
+            progressWriteMutex.withLock {
+                // A navigation request invalidates UI events from the old page.
+                if (generation != progressGeneration || _chapterIndex.value != index) return@withLock
+                if (index != null && total > 0) {
+                    readingRepository.saveChapterProgress(readingItemId, index, charOffset, withinChapterFraction)
+                    readingRepository.saveBookChapterState(
+                        readingItemId,
+                        index,
+                        (index + withinChapterFraction) / total,
+                    )
+                } else {
+                    readingRepository.saveProgress(readingItemId, charOffset, withinChapterFraction)
+                }
             }
         }
     }

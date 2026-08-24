@@ -20,8 +20,14 @@ interface ReadingItemDao {
     @Query("SELECT * FROM reading_items WHERE id = :id")
     suspend fun getById(id: Long): ReadingItem?
 
+    @Query("SELECT * FROM reading_items WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<Long>): List<ReadingItem>
+
     @Query("SELECT COUNT(*) FROM reading_items")
     suspend fun count(): Int
+
+    @Query("SELECT * FROM reading_items ORDER BY id")
+    suspend fun getAll(): List<ReadingItem>
 
     @Insert
     suspend fun insert(item: ReadingItem): Long

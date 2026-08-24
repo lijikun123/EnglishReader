@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Card
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -23,7 +24,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -42,7 +45,16 @@ fun SettingsScreen(
     val preferChinese by viewModel.preferChineseFirst.collectAsStateWithLifecycle()
     val dictionaryCount by viewModel.dictionaryCount.collectAsStateWithLifecycle()
     val dictionaryImporting by viewModel.dictionaryImporting.collectAsStateWithLifecycle()
+    val syncSettings by viewModel.syncSettings.collectAsStateWithLifecycle()
+    val syncRuntimeState by viewModel.syncRuntimeState.collectAsStateWithLifecycle()
+    val syncActionInProgress by viewModel.syncActionInProgress.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+
+    var syncServerUrl by remember { mutableStateOf("") }
+    var syncEmail by remember { mutableStateOf("") }
+    var syncPassword by remember { mutableStateOf("") }
+    val signedInToSync = !syncSettings.userId.isNullOrBlank()
+    val syncBusy = syncActionInProgress || syncRuntimeState.syncing
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -56,6 +68,17 @@ fun SettingsScreen(
         message?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.consumeMessage()
+        }
+    }
+
+    LaunchedEffect(syncSettings.serverUrl, signedInToSync) {
+        if (syncSettings.serverUrl.isNotBlank() && (syncServerUrl.isBlank() || signedInToSync)) {
+            syncServerUrl = syncSettings.serverUrl
+        }
+    }
+    LaunchedEffect(syncSettings.email) {
+        if (syncEmail.isBlank() && !syncSettings.email.isNullOrBlank()) {
+            syncEmail = syncSettings.email.orEmpty()
         }
     }
 
@@ -106,6 +129,94 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
+            }
+
+            SettingsSection(title = "跨设备同步（测试版）") {
+                Text(
+                    text = "同步书架、书籍内容和阅读位置。AI Key、AI 缓存、字号/主题、词典与生词暂不上传。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = syncServerUrl,
+                    onValueChange = { syncServerUrl = it },
+                    enabled = !signedInToSync && !syncBusy,
+                    label = { Text("同步服务器地址") },
+                    placeholder = { Text("https://reader.example.com") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                )
+                if (!signedInToSync) {
+                    OutlinedButton(
+                        onClick = { viewModel.saveSyncServer(syncServerUrl) },
+                        enabled = !syncBusy,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) { Text("保存同步地址") }
+
+                    OutlinedTextField(
+                        value = syncEmail,
+                        onValueChange = { syncEmail = it },
+                        enabled = !syncBusy,
+                        label = { Text("同步账号邮箱") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                    OutlinedTextField(
+                        value = syncPassword,
+                        onValueChange = { syncPassword = it },
+                        enabled = !syncBusy,
+                        label = { Text("同步账号密码") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                    Button(
+                        onClick = { viewModel.loginSync(syncServerUrl, syncEmail, syncPassword) },
+                        enabled = !syncBusy,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) { Text(if (syncBusy) "正在连接…" else "登录并同步") }
+                    OutlinedButton(
+                        onClick = { viewModel.registerSync(syncServerUrl, syncEmail, syncPassword) },
+                        enabled = !syncBusy,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) { Text("创建新账号（首次使用）") }
+                    Text(
+                        text = "为防止陌生人注册，服务器默认关闭创建账号；首次创建时需要你临时在服务器开启它，完成后立即关闭。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                } else {
+                    Text(
+                        text = "已登录：${syncSettings.email.orEmpty()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Text(
+                        text = "上次成功同步：${formatSyncTime(syncSettings.lastSuccessfulSyncAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    Button(
+                        onClick = viewModel::syncNow,
+                        enabled = !syncBusy,
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    ) { Text(if (syncBusy) "正在同步…" else "立即同步") }
+                    OutlinedButton(
+                        onClick = viewModel::logoutSync,
+                        enabled = !syncBusy,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) { Text("退出同步账号") }
+                }
+                syncRuntimeState.lastMessage?.let { status ->
+                    Text(
+                        text = "同步状态：$status",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
 
             // AI 设置
@@ -193,12 +304,19 @@ fun SettingsScreen(
             SettingsSection(title = "导出设置") {
                 DisabledRow(
                     title = "导出生词到 Anki TSV",
-                    subtitle = "即将推出",
+                    subtitle = "请在「生词本」右上角点击导出图标，保存后可在 Anki / AnkiDroid 导入。",
                 )
             }
         }
     }
 }
+
+private fun formatSyncTime(timestamp: Long?): String = timestamp?.let {
+    java.text.DateFormat.getDateTimeInstance(
+        java.text.DateFormat.SHORT,
+        java.text.DateFormat.SHORT,
+    ).format(java.util.Date(it))
+} ?: "尚未成功同步"
 
 @Composable
 private fun SettingsSection(title: String, content: @Composable () -> Unit) {

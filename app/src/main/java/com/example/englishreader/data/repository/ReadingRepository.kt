@@ -5,21 +5,31 @@ import com.example.englishreader.data.importer.ParsedChapter
 import com.example.englishreader.data.importer.ParsedTocItem
 import com.example.englishreader.data.local.AppDatabase
 import com.example.englishreader.data.local.dao.ChapterMeta
+import com.example.englishreader.data.local.dao.ChapterPhraseDao
+import com.example.englishreader.data.local.dao.ChapterTranslationDao
+import com.example.englishreader.data.local.dao.LookupHistoryDao
 import com.example.englishreader.data.local.dao.ReadingChapterDao
 import com.example.englishreader.data.local.dao.ReadingItemDao
 import com.example.englishreader.data.local.dao.ReadingTocItemDao
+import com.example.englishreader.data.local.dao.VocabularyDao
 import com.example.englishreader.data.local.entity.BookFormat
 import com.example.englishreader.data.local.entity.ContentType
 import com.example.englishreader.data.local.entity.ReadingChapter
 import com.example.englishreader.data.local.entity.ReadingItem
 import com.example.englishreader.data.local.entity.ReadingTocItem
+import com.example.englishreader.data.sync.SyncMutationWriter
 import kotlinx.coroutines.flow.Flow
 
 class ReadingRepository(
     private val dao: ReadingItemDao,
     private val chapterDao: ReadingChapterDao,
     private val tocDao: ReadingTocItemDao,
+    private val chapterTranslationDao: ChapterTranslationDao,
+    private val chapterPhraseDao: ChapterPhraseDao,
+    private val lookupHistoryDao: LookupHistoryDao,
+    private val vocabularyDao: VocabularyDao,
     private val database: AppDatabase,
+    private val syncMutationWriter: SyncMutationWriter? = null,
 ) {
 
     fun observeAll(): Flow<List<ReadingItem>> = dao.observeAll()
@@ -35,9 +45,13 @@ class ReadingRepository(
         content: String,
         contentType: ContentType,
         format: BookFormat,
-    ): Long = dao.insert(
-        ReadingItem(title = title, content = content, contentType = contentType, format = format),
-    )
+    ): Long = database.withTransaction {
+        val bookId = dao.insert(
+            ReadingItem(title = title, content = content, contentType = contentType, format = format),
+        )
+        syncMutationWriter?.onBookImported(bookId)
+        bookId
+    }
 
     /** 插入 EPUB：书 + 章节 + 目录，放在一个事务里，保证一致性。 */
     suspend fun addEpubBook(
@@ -85,18 +99,15 @@ class ReadingRepository(
                 },
             )
         }
+        syncMutationWriter?.onBookImported(bookId)
         bookId
     }
 
     // ---- 进度：单文件 ----
 
-    suspend fun saveProgress(id: Long, position: Int, progress: Float) {
-        dao.updateProgress(
-            id = id,
-            position = position,
-            progress = progress.coerceIn(0f, 1f),
-            updatedAt = System.currentTimeMillis(),
-        )
+    suspend fun saveProgress(id: Long, position: Int, progress: Float) = database.withTransaction {
+        dao.updateProgress(id, position, progress.coerceIn(0f, 1f), System.currentTimeMillis())
+        syncMutationWriter?.onProgressChanged(id)
     }
 
     // ---- 章节（EPUB） ----
@@ -113,25 +124,31 @@ class ReadingRepository(
     suspend fun chapterContentLengths(bookId: Long): List<Int> =
         chapterDao.contentLengths(bookId)
 
-    suspend fun saveChapterProgress(bookId: Long, index: Int, position: Int, progress: Float) {
-        chapterDao.updateProgress(
-            bookId = bookId,
-            index = index,
-            position = position,
-            progress = progress.coerceIn(0f, 1f),
-            updatedAt = System.currentTimeMillis(),
-        )
+    suspend fun saveChapterProgress(bookId: Long, index: Int, position: Int, progress: Float) = database.withTransaction {
+        chapterDao.updateProgress(bookId, index, position, progress.coerceIn(0f, 1f), System.currentTimeMillis())
+        syncMutationWriter?.onProgressChanged(bookId)
     }
 
     /** 保存「当前读到第几章」+ 整本书进度。 */
-    suspend fun saveBookChapterState(bookId: Long, chapterIndex: Int, bookProgress: Float) {
-        dao.updateChapterState(
-            id = bookId,
-            chapterIndex = chapterIndex,
-            progress = bookProgress.coerceIn(0f, 1f),
-            updatedAt = System.currentTimeMillis(),
-        )
+    suspend fun saveBookChapterState(bookId: Long, chapterIndex: Int, bookProgress: Float) = database.withTransaction {
+        dao.updateChapterState(bookId, chapterIndex, bookProgress.coerceIn(0f, 1f), System.currentTimeMillis())
+        syncMutationWriter?.onProgressChanged(bookId)
     }
 
-    suspend fun delete(item: ReadingItem) = dao.delete(item)
+    suspend fun delete(item: ReadingItem) = database.withTransaction {
+        syncMutationWriter?.onBookDeleted(item.id)
+        clearBookRelatedData(item.id)
+        dao.delete(item)
+    }
+
+    /**
+     * 章节与目录有外键级联；这些表没有外键，因为它们是可独立淘汰的缓存/历史，
+     * 因此删除书籍时显式清理或解除引用。已收藏的生词保留，方便继续复习。
+     */
+    private suspend fun clearBookRelatedData(bookId: Long) {
+        chapterTranslationDao.deleteForBook(bookId)
+        chapterPhraseDao.deleteForBook(bookId)
+        lookupHistoryDao.clearBookReference(bookId)
+        vocabularyDao.clearBookReference(bookId)
+    }
 }

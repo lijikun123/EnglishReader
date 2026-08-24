@@ -1,0 +1,8 @@
+[Unit]
+Description=KReader PostgreSQL backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/kreader-sync/deploy/backup-postgres.sh

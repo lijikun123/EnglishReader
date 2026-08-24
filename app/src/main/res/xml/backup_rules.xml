@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Refresh tokens are additionally Android-Keystore encrypted, but never
+         include their ciphertext in a device/cloud backup. -->
+    <exclude domain="sharedpref" path="sync_secure_session.xml" />
+    <exclude domain="sharedpref" path="ai_secure_key.xml" />
+    <!-- Device identity, AI settings and any legacy plaintext key stay local. -->
+    <exclude domain="file" path="datastore/settings.preferences_pb" />
+</full-backup-content>

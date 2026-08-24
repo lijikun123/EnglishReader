@@ -42,6 +42,9 @@ import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.sin
 
+private const val EDGE_SWIPE_FRACTION = 0.12f
+private const val MIN_EDGE_SWIPE_PX = 48f
+
 /**
  * 仿真翻书（page curl）阅读器：每页先离屏渲染成位图，翻页时用 drawBitmapMesh 把“正在翻的那一页”
  * 按圆柱卷起变形，露出下面一页 —— 跟手拖动、松手吸附/回弹。
@@ -63,6 +66,12 @@ fun PageCurlReader(
     onPageChanged: (Int) -> Unit,
     onCrossNext: () -> Unit,
     onCrossPrev: () -> Unit,
+    canCrossNext: Boolean = false,
+    canCrossPrev: Boolean = false,
+    /** Pre-rendered edge spread of the neighbouring chapter, when available. */
+    crossNextSheet: List<AnnotatedString?>? = null,
+    /** Pre-rendered edge spread of the neighbouring chapter, when available. */
+    crossPrevSheet: List<AnnotatedString?>? = null,
     onWord: (word: String, sentence: String) -> Unit,
     onLongPress: (sentence: String, paragraph: String) -> Unit,
     onToggleControls: () -> Unit,
@@ -78,6 +87,12 @@ fun PageCurlReader(
     var dir by remember { mutableIntStateOf(0) }          // +1 向后翻，-1 向前翻
     var turning by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }  // 0=平铺，1=翻完
+    // +1/-1 means the current curl will finish in the neighbouring chapter.
+    var crossingChapter by remember { mutableIntStateOf(0) }
+    // When a neighbouring chapter is not renderable yet (e.g. bilingual mode),
+    // a full edge swipe still changes chapter on release rather than requiring a tap.
+    var edgeDragDirection by remember { mutableIntStateOf(0) }
+    var edgeDragDistance by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
     val bg = MaterialTheme.colorScheme.surface
 
@@ -98,6 +113,15 @@ fun PageCurlReader(
     }
 
     fun commit() {
+        val crossDirection = crossingChapter
+        if (crossDirection != 0) {
+            crossingChapter = 0
+            dir = 0
+            turning = false
+            progress = 0f
+            if (crossDirection > 0) onCrossNext() else onCrossPrev()
+            return
+        }
         val np = (sheet + dir).coerceIn(0, lastSheet)
         sheet = np
         onPageChanged(np * cols)
@@ -107,9 +131,21 @@ fun PageCurlReader(
     }
 
     fun startTurn(d: Int) {
-        if (turning) return
-        if (d > 0 && sheet >= lastSheet) { onCrossNext(); return }
-        if (d < 0 && sheet <= 0) { onCrossPrev(); return }
+        if (turning || edgeDragDirection != 0) return
+        val crossForward = d > 0 && sheet >= lastSheet
+        val crossBackward = d < 0 && sheet <= 0
+        if (crossForward || crossBackward) {
+            val canCross = if (d > 0) canCrossNext else canCrossPrev
+            if (!canCross) return
+            val adjacentSheet = if (d > 0) crossNextSheet else crossPrevSheet
+            // With no adjacent bitmap (currently the bilingual loading fallback),
+            // retain the old immediate chapter handoff for side taps.
+            if (adjacentSheet == null) {
+                if (d > 0) onCrossNext() else onCrossPrev()
+                return
+            }
+            crossingChapter = d
+        }
         dir = d
         turning = true
         progress = 0f
@@ -122,9 +158,19 @@ fun PageCurlReader(
     Box(
         modifier
             .fillMaxSize()
-            .pointerInput(pages) {
+            .pointerInput(pages, crossNextSheet, crossPrevSheet, canCrossNext, canCrossPrev) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
+                        if (edgeDragDirection != 0) {
+                            val d = edgeDragDirection
+                            val crossed = edgeDragDistance >= max(size.width * EDGE_SWIPE_FRACTION, MIN_EDGE_SWIPE_PX)
+                            edgeDragDirection = 0
+                            edgeDragDistance = 0f
+                            if (crossed) {
+                                if (d > 0) onCrossNext() else onCrossPrev()
+                            }
+                            return@detectHorizontalDragGestures
+                        }
                         if (!turning) return@detectHorizontalDragGestures
                         val p = progress
                         scope.launch {
@@ -133,27 +179,50 @@ fun PageCurlReader(
                                 commit()
                             } else {
                                 animate(p, 0f, animationSpec = tween(220)) { v, _ -> progress = v }
-                                turning = false; dir = 0
+                                turning = false; dir = 0; crossingChapter = 0
                             }
                         }
                     },
                     onDragCancel = {
+                        edgeDragDirection = 0
+                        edgeDragDistance = 0f
+                        if (!turning) return@detectHorizontalDragGestures
                         scope.launch {
                             animate(progress, 0f, animationSpec = tween(180)) { v, _ -> progress = v }
-                            turning = false; dir = 0
+                            turning = false; dir = 0; crossingChapter = 0
                         }
                     },
                 ) { change, dragAmount ->
-                    if (!turning) {
+                    if (!turning && edgeDragDirection == 0) {
                         val d = if (dragAmount < 0) 1 else -1
-                        // 边界：本章首/尾页拖动不起卷（跨章交给点击两侧/章节按钮），避免空白卷页
-                        if (d > 0 && sheet >= lastSheet) return@detectHorizontalDragGestures
-                        if (d < 0 && sheet <= 0) return@detectHorizontalDragGestures
-                        dir = d
-                        turning = true
-                        progress = 0f
+                        val crossForward = d > 0 && sheet >= lastSheet
+                        val crossBackward = d < 0 && sheet <= 0
+                        if (crossForward || crossBackward) {
+                            val canCross = if (d > 0) canCrossNext else canCrossPrev
+                            if (!canCross) return@detectHorizontalDragGestures
+                            val adjacentSheet = if (d > 0) crossNextSheet else crossPrevSheet
+                            if (adjacentSheet == null) {
+                                // No bitmap to curl into, but keep the gesture
+                                // continuous: a deliberate edge swipe crosses on release.
+                                edgeDragDirection = d
+                                edgeDragDistance = 0f
+                            } else {
+                                crossingChapter = d
+                                dir = d
+                                turning = true
+                                progress = 0f
+                            }
+                        } else {
+                            dir = d
+                            turning = true
+                            progress = 0f
+                        }
                     }
                     change.consume()
+                    if (edgeDragDirection != 0) {
+                        edgeDragDistance = (edgeDragDistance + (-edgeDragDirection) * dragAmount).coerceAtLeast(0f)
+                        return@detectHorizontalDragGestures
+                    }
                     val w = size.width.toFloat().coerceAtLeast(1f)
                     progress = (progress + (-dir) * dragAmount / w).coerceIn(0f, 1f)
                 }
@@ -162,8 +231,14 @@ fun PageCurlReader(
     ) {
         // 离屏捕获当前/前/后「纸」位图（不可见，仅用于卷页动画）
         val curBmp = capturedSheet(sheetSlices(sheet), style, contentMaxWidth, horizontalPadding, verticalPadding, bg)
-        val nextBmp = capturedSheet(sheetSlices(sheet + 1), style, contentMaxWidth, horizontalPadding, verticalPadding, bg)
-        val prevBmp = capturedSheet(sheetSlices(sheet - 1), style, contentMaxWidth, horizontalPadding, verticalPadding, bg)
+        val nextBmp = capturedSheet(
+            if (sheet < lastSheet) sheetSlices(sheet + 1) else crossNextSheet,
+            style, contentMaxWidth, horizontalPadding, verticalPadding, bg,
+        )
+        val prevBmp = capturedSheet(
+            if (sheet > 0) sheetSlices(sheet - 1) else crossPrevSheet,
+            style, contentMaxWidth, horizontalPadding, verticalPadding, bg,
+        )
 
         if (!turning) {
             // 平铺：实时文本，查词/长按/点两侧翻页/点中间呼出工具栏都生效

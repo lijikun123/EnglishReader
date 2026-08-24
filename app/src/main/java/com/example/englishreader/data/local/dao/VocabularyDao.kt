@@ -18,8 +18,12 @@ interface VocabularyDao {
     @Query("SELECT * FROM vocabulary_items WHERE id = :id")
     fun observeById(id: Long): Flow<VocabularyItem?>
 
-    @Query("SELECT EXISTS(SELECT 1 FROM vocabulary_items WHERE word = :word)")
-    suspend fun exists(word: String): Boolean
+    /**
+     * 生词本按显示词条去重；调用方会先折叠空白、转成小写。
+     * 这样 Word / word 和重复点开的同一词组不会生成多张卡片。
+     */
+    @Query("SELECT EXISTS(SELECT 1 FROM vocabulary_items WHERE LOWER(TRIM(word)) = :normalizedWord)")
+    suspend fun existsNormalized(normalizedWord: String): Boolean
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: VocabularyItem): Long
@@ -29,4 +33,11 @@ interface VocabularyDao {
 
     @Delete
     suspend fun delete(item: VocabularyItem)
+
+    @Query("DELETE FROM vocabulary_items WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
+
+    /** 生词本保留来源书名和原句，只移除已删除书籍的本地关联。 */
+    @Query("UPDATE vocabulary_items SET sourceReadingItemId = NULL WHERE sourceReadingItemId = :readingItemId")
+    suspend fun clearBookReference(readingItemId: Long)
 }

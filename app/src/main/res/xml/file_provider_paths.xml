@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Only generated vocabulary exports may be shared with other apps. -->
+    <cache-path name="vocabulary_exports" path="vocabulary_exports/" />
+</paths>

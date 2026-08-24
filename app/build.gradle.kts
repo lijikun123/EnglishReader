@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
 
@@ -15,8 +16,8 @@ android {
         applicationId = "com.example.englishreader"
         minSdk = 24
         targetSdk = 36
-        versionCode = 18
-        versionName = "0.1.18"
+        versionCode = 21
+        versionName = "0.1.21"
 
         vectorDrawables { useSupportLibrary = true }
     }
@@ -82,4 +83,13 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
 
     implementation(libs.kotlinx.coroutines.android)
+
+    // Private account sync: HTTP client + reliable offline work queue.
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.android)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
+    implementation(libs.androidx.work.runtime.ktx)
+
+    testImplementation("junit:junit:4.13.2")
 }

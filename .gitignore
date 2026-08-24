@@ -8,5 +8,7 @@
 .externalNativeBuild
 .cxx
 /.kotlin
-local.properties
 /app/build
+/server/.gradle
+/server/build
+/server/deploy/.env
