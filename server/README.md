@@ -1,5 +1,7 @@
 # KReader sync server
 
+现已附带网页版阅读器：原同步地址后加 `/web/` 即可访问，使用 App 原有账号阅读已同步书籍并同步进度。功能、部署和验证见 [WEB_READER.md](WEB_READER.md)。
+
 KReader 的私有、按账号隔离的 Android 同步后端。它同步账号、书籍元数据、解析后的书籍内容包、阅读位置和书籍删除标记；不会上传 AI API Key、词典/AI 缓存或本地阅读排版设置。
 
 ## 同步语义

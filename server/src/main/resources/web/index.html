@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="KReader 网页阅读器。使用现有同步账号，阅读云端书籍并与 Android App 同步进度。">
+  <title>KReader · 网页阅读</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳至正文</a>
+  <header class="app-header">
+    <a class="brand" href="./" aria-label="KReader 书架"><img src="./icon.svg" alt="" width="34" height="34"><span>KReader</span><span class="edition">网页版</span></a>
+    <div class="account" id="account" hidden><span id="account-email"></span><button id="logout" class="quiet">退出登录</button></div>
+  </header>
+  <main id="main">
+    <section id="login-view" class="login-view" aria-labelledby="login-heading">
+      <div class="login-card">
+        <span class="eyebrow">KYAN'S READER</span>
+        <h1 id="login-heading">接着上次，继续读。</h1>
+        <p class="muted">登录 App 中的同步账号，打开已有书籍。</p>
+        <form id="login-form">
+          <label for="email">邮箱</label>
+          <input id="email" type="email" autocomplete="username" required maxlength="254" placeholder="你的同步账号邮箱">
+          <label for="password">密码</label>
+          <input id="password" type="password" autocomplete="current-password" required placeholder="输入密码">
+          <p id="login-error" class="error" role="alert" hidden></p>
+          <button id="login-button" class="primary" type="submit">登录并打开书架 <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="login-note">书架来自当前同步服务。还没有书籍？先在 App 中导入，并完成一次同步。</p>
+      </div>
+      <p class="login-foot">阅读进度互通 · 书籍由 App 管理</p>
+    </section>
+    <section id="library-view" class="library-view" hidden aria-labelledby="library-heading">
+      <div class="library-heading"><div><span class="eyebrow">MY LIBRARY</span><h1 id="library-heading">我的书架 <span id="book-count"></span></h1></div><button id="sync-button">同步书架 <span aria-hidden="true">↻</span></button></div>
+      <div class="sync-line"><span class="status-dot" aria-hidden="true"></span><p id="sync-status" role="status" aria-live="polite">正在加载书架…</p></div>
+      <p id="library-error" class="error" role="alert" hidden></p>
+      <div id="books" class="books"></div>
+      <div id="empty-library" class="empty-state" hidden><span class="empty-mark" aria-hidden="true">K</span><h2>这里还没有书籍</h2><p>在 App 中登录同一账号，完成书籍同步后，<br>点击「同步书架」就能开始阅读。</p></div>
+      <p class="shelf-note">现有书籍会自动出现在这里，阅读位置与 App 同步。</p>
+    </section>
+    <section id="reader-view" class="reader-view" hidden aria-label="阅读器">
+      <header class="reader-toolbar">
+        <button id="back" class="quiet">← <span>书架</span></button>
+        <div class="reader-heading"><strong id="book-title"></strong><span id="chapter-label"></span></div>
+        <button id="toc-button" aria-haspopup="dialog">目录</button><button id="settings-button" aria-haspopup="dialog" aria-label="阅读设置">Aa</button>
+      </header>
+      <div id="remote-banner" class="remote-banner" hidden><span>其他设备更新了阅读位置。</span><button id="use-remote">接着读</button><button id="keep-position" class="quiet">留在此处</button></div>
+      <p id="reader-error" class="error reader-error" role="alert" hidden></p>
+      <div id="reading-scroll" class="reading-scroll" tabindex="0" aria-label="书籍正文，使用空格或方向键翻页">
+        <article id="article" class="article" lang="en"><h1 id="chapter-title" tabindex="-1"></h1><div id="book-text" class="book-text"></div><p class="chapter-end" id="chapter-end">— 本章结束 —</p></article>
+      </div>
+      <footer class="reader-footer"><button id="previous-page">← 上一页</button><div class="reading-status"><span id="reading-progress"></span><span id="reader-sync-status" role="status" aria-live="polite"></span></div><button id="next-page">下一页 →</button></footer>
+    </section>
+  </main>
+  <dialog id="toc-dialog" aria-labelledby="toc-title"><div class="dialog-heading"><h2 id="toc-title">目录</h2><button class="quiet" data-close="toc-dialog" aria-label="关闭目录">✕</button></div><nav id="toc-list" aria-label="章节目录"></nav></dialog>
+  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-heading"><h2 id="settings-title">阅读设置</h2><button class="quiet" data-close="settings-dialog" aria-label="关闭阅读设置">✕</button></div>
+    <label for="font-size">字号 <output id="font-size-value" for="font-size">22</output></label><input id="font-size" type="range" min="16" max="34" value="22">
+    <label for="line-height">行距</label><select id="line-height"><option value="1.6">紧凑</option><option value="1.9" selected>舒适</option><option value="2.2">宽松</option></select>
+    <label for="reader-width">阅读宽度</label><select id="reader-width"><option value="620">窄</option><option value="760" selected>适中</option><option value="960">宽</option></select>
+    <fieldset><legend>主题</legend><div class="theme-options"><label><input type="radio" name="theme" value="light" checked>浅色</label><label><input type="radio" name="theme" value="sepia">护眼</label><label><input type="radio" name="theme" value="dark">深色</label></div></fieldset>
+    <p class="muted small">排版设置仅保存在此浏览器。</p>
+  </dialog>
+  <noscript>请启用 JavaScript，以登录账号并同步阅读进度。</noscript>
+</body>
+</html>

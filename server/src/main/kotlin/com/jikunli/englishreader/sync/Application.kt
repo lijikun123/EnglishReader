@@ -78,6 +78,7 @@ fun Application.kreaderModule(
     }
 
     routing {
+        webReaderRoutes()
         get("/healthz") {
             call.respond(HealthResponse("ok", System.currentTimeMillis()))
         }
