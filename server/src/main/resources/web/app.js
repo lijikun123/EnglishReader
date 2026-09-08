@@ -27,11 +27,23 @@ function status(text) {
   $("reader-sync-status").textContent = text;
 }
 function updateLearningButtons() {
+  const unavailable = !aiStatus.enabled;
+  $("ai-setup-notice").hidden = !unavailable;
+  $("ai-settings-status").textContent = unavailable
+    ? "当前状态：VPS 尚未配置百炼 API Key。"
+    : "当前状态：已启用，使用 VPS 上配置的 " + aiStatus.model + "。";
   for (const [id, enabled] of [["bilingual-button",learningPreferences.bilingual],["phrases-button",learningPreferences.phrases]]) {
-    $(id).disabled = !aiStatus.enabled;
+    $(id).disabled = unavailable;
     $(id).setAttribute("aria-pressed", String(aiStatus.enabled && enabled));
-    $(id).title = aiStatus.enabled ? "由 VPS 上配置的 " + aiStatus.model + " 提供" : "VPS 尚未配置 AI API Key";
+    $(id).title = aiStatus.enabled ? "由 VPS 上配置的 " + aiStatus.model + " 提供" : "AI 尚未配置，请使用“设置 AI”查看方法";
+    if (unavailable) $(id).setAttribute("aria-describedby", "ai-setup-notice");
+    else $(id).removeAttribute("aria-describedby");
   }
+}
+function openAiSettings() {
+  updateLearningButtons();
+  $("settings-dialog").close();
+  $("ai-settings-dialog").showModal();
 }
 function samePosition(a, b) {
   return a && b && a.chapterIndex === b.chapterIndex && a.charOffset === b.charOffset;
@@ -432,6 +444,8 @@ $("bilingual-button").addEventListener("click", () => toggleLearning("bilingual"
 $("phrases-button").addEventListener("click", () => toggleLearning("phrases"));
 $("toc-button").addEventListener("click", openToc);
 $("settings-button").addEventListener("click", () => $("settings-dialog").showModal());
+$("ai-settings-button").addEventListener("click", openAiSettings);
+$("open-ai-settings").addEventListener("click", openAiSettings);
 document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => $(button.dataset.close).close()));
 $("use-remote").addEventListener("click", () => {
   if (!active?.remote) return;

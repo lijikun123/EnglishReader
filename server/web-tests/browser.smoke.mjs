@@ -29,6 +29,7 @@ function auth(user,deviceId) {
   return {accessToken:id,refreshToken:id,accessTokenExpiresAt:Date.now()+900000,user:{id:user,email:user+"@example.test"}};
 }
 const errors=[];
+let aiEnabled=true;
 const server=http.createServer(async(req,res)=>{
   const path=new URL(req.url,"http://localhost").pathname;
   const json=(data,status=200)=>{res.writeHead(status,{"Content-Type":"application/json"});res.end(JSON.stringify(data));};
@@ -53,7 +54,7 @@ const server=http.createServer(async(req,res)=>{
     const identity=tokens.get(req.headers.authorization?.replace("Bearer ",""));
     if(!identity)return json({code:"unauthorized"},401);
     if(path===basePath+"v1/auth/logout"){return res.writeHead(204).end();}
-    if(path===basePath+"v1/ai/status")return json({enabled:true,model:"test-model",cacheVersion:"web-ai-v1:test-model"});
+    if(path===basePath+"v1/ai/status")return json({enabled:aiEnabled,model:"test-model",cacheVersion:"web-ai-v1:test-model"});
     if(path===basePath+"v1/ai/translate") {
       aiRequests.push({kind:"translation",...data});
       return json({translation:"这是一段用于浏览器测试的自然中文译文。"});
@@ -151,6 +152,19 @@ try {
   await p.locator("#sync-button").click();
   await p.getByRole("button",{name:"继续阅读 →"}).click();
   await p.locator("#chapter-label").filter({hasText:"Chapter I"}).waitFor();
+  // A missing server key leaves learning controls disabled but gives a visible setup path.
+  aiEnabled=false;
+  await p.locator("#back").click();
+  await p.reload();
+  await p.locator("#library-view").waitFor({state:"visible"});
+  await p.getByRole("button",{name:"继续阅读 →"}).click();
+  await p.locator("#ai-setup-notice").waitFor({state:"visible"});
+  assert.equal(await p.locator("#bilingual-button").isDisabled(),true);
+  assert.equal(await p.locator("#phrases-button").isDisabled(),true);
+  await p.getByRole("button",{name:"设置 AI"}).click();
+  await p.locator("#ai-settings-dialog[open]").waitFor();
+  await p.locator("#ai-settings-status").filter({hasText:"尚未配置百炼 API Key"}).waitFor();
+  await p.locator('[data-close="ai-settings-dialog"]').click();
   // Delete tombstone removes book without any book mutation.
   await p.locator("#back").click();
   append("book.delete",{bookId});

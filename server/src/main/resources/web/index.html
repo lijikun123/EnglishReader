@@ -53,6 +53,10 @@
           <button id="settings-button" aria-haspopup="dialog" aria-label="阅读设置">Aa</button>
         </div>
       </header>
+      <div id="ai-setup-notice" class="ai-setup-notice" role="status" hidden>
+        <span>AI 尚未配置，双语和词组暂不可用。</span>
+        <button id="ai-settings-button" class="quiet" aria-haspopup="dialog">设置 AI</button>
+      </div>
       <div id="remote-banner" class="remote-banner" hidden><span>其他设备更新了阅读位置。</span><button id="use-remote">接着读</button><button id="keep-position" class="quiet">留在此处</button></div>
       <p id="reader-error" class="error reader-error" role="alert" hidden></p>
       <p id="learning-error" class="error reader-error" role="alert" hidden></p>
@@ -68,7 +72,25 @@
     <label for="line-height">行距</label><select id="line-height"><option value="1.6">紧凑</option><option value="1.9" selected>舒适</option><option value="2.2">宽松</option></select>
     <label for="reader-width">阅读宽度</label><select id="reader-width"><option value="620">窄</option><option value="760" selected>适中</option><option value="960">宽</option></select>
     <fieldset><legend>主题</legend><div class="theme-options"><label><input type="radio" name="theme" value="light" checked>浅色</label><label><input type="radio" name="theme" value="sepia">护眼</label><label><input type="radio" name="theme" value="dark">深色</label></div></fieldset>
+    <section class="ai-settings-summary" aria-labelledby="ai-settings-summary-title"><h3 id="ai-settings-summary-title">AI 精读</h3><p>双语翻译和词组讲解由百炼提供。</p><button id="open-ai-settings" type="button">AI 设置</button></section>
     <p class="muted small">排版设置仅保存在此浏览器。</p>
+  </dialog>
+  <dialog id="ai-settings-dialog" aria-labelledby="ai-settings-title"><div class="dialog-heading"><h2 id="ai-settings-title">启用 AI 精读</h2><button class="quiet" data-close="ai-settings-dialog" aria-label="关闭 AI 设置">✕</button></div>
+    <p id="ai-settings-status" class="ai-settings-status" role="status"></p>
+    <section id="ai-settings-steps">
+      <p>为了保护百炼 API Key，网页不会让你填写或保存 Key。请只在 VPS 上配置，网页会自动读取可用状态。</p>
+      <ol>
+        <li>通过 SSH 登录 VPS，进入 <code>/opt/kreader-sync/deploy</code>。</li>
+        <li>在受保护的 <code>.env</code> 中添加以下配置；不要把 Key 发到聊天、提交到 GitHub 或填进网页。</li>
+      </ol>
+      <pre class="setup-code"><code>DASHSCOPE_API_KEY=你的百炼_API_Key
+KREADER_AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+KREADER_AI_MODEL=qwen-plus</code></pre>
+      <ol start="3"><li>在同一目录执行：</li></ol>
+      <pre class="setup-code"><code>docker compose up -d --no-deps --force-recreate api</code></pre>
+      <p class="muted small">以上默认地址适用于北京地域；如果百炼控制台给了业务空间或其他地域的专属地址，请使用控制台显示的完整 Base URL。Key 和地域必须匹配。</p>
+      <p class="muted small"><a href="https://help.aliyun.com/zh/model-studio/get-api-key/" target="_blank" rel="noopener noreferrer">查看百炼 API Key 获取与安全说明</a></p>
+    </section>
   </dialog>
   <dialog id="phrase-dialog" aria-labelledby="phrase-title">
     <div class="dialog-heading"><div><span id="phrase-type" class="phrase-type"></span><h2 id="phrase-title"></h2></div><button class="quiet" data-close="phrase-dialog" aria-label="关闭词组讲解">✕</button></div>
