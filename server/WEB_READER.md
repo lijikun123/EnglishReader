@@ -14,7 +14,7 @@
 
 - “双语”按段落显示自然中文译文；“词组”识别熟词僻义、固定搭配、学术语块和句型，点击正文中的加粗标记查看中文讲解。
 - 浏览器只调用同源、需要登录的 `/v1/ai/*` 接口。AI Key 由 VPS 读取，不会发送给浏览器或写入 GitHub。
-- 服务端复用 App 的精读提示词，默认调用 `https://api.deepseek.com/chat/completions` 和 `deepseek-v4-flash`；Base URL 与模型都可通过环境变量替换为其他兼容服务。
+- 服务端复用 App 的精读提示词，默认调用阿里云百炼北京地域的 OpenAI 兼容接口 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` 和 `qwen-plus`；Base URL 与模型都可通过环境变量替换。
 - 译文和词组按账号、模型、书籍正文版本、章节及段落缓存在当前浏览器的 IndexedDB。刷新和重开后复用缓存；App 现有本地缓存不会上传，因此网页不会直接复用手机上已经生成的结果。
 - 同一时刻最多发出 2 个上游请求，服务端默认每个账号每分钟最多 60 个 AI 请求。失败结果不缓存。
 - 发送给 AI 服务的内容仅是当前需要处理的英文段落。开启功能表示允许将这些段落发送给 VPS 配置的 AI 提供商。
@@ -24,13 +24,13 @@
 
 ```dotenv
 KREADER_AI_API_KEY=你的_API_Key
-KREADER_AI_BASE_URL=https://api.deepseek.com
-KREADER_AI_MODEL=deepseek-v4-flash
+KREADER_AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+KREADER_AI_MODEL=qwen-plus
 KREADER_MAX_AI_INPUT_CHARS=6000
 KREADER_MAX_AI_REQUESTS_PER_MINUTE=60
 ```
 
-`.env` 应保持权限 `600` 且绝不能提交到 Git。没有配置 Key 时，AI 状态接口会报告禁用，阅读、书架和进度同步不受影响。
+也可以使用百炼官方环境变量 `DASHSCOPE_API_KEY` 代替 `KREADER_AI_API_KEY`；如果两者都存在，优先使用后者。`.env` 应保持权限 `600` 且绝不能提交到 Git。没有配置 Key 时，AI 状态接口会报告禁用，阅读、书架和进度同步不受影响。百炼其他地域或业务空间使用不同的 Base URL 时，按控制台显示的地址修改 `KREADER_AI_BASE_URL`。
 
 ## 进度同步
 

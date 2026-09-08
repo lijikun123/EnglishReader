@@ -47,11 +47,13 @@ data class AppConfig(
                 maxAuthAttemptsPerMinute = environment["KREADER_MAX_AUTH_ATTEMPTS_PER_MINUTE"]?.toIntOrNull() ?: 10,
                 // AI is optional. Without a key the reader still works and reports
                 // the feature as unavailable instead of failing at startup.
-                aiApiKey = environment["KREADER_AI_API_KEY"]?.trim()?.takeIf { it.isNotEmpty() },
+                aiApiKey = sequenceOf("KREADER_AI_API_KEY", "DASHSCOPE_API_KEY")
+                    .mapNotNull { environment[it]?.trim()?.takeIf(String::isNotEmpty) }
+                    .firstOrNull(),
                 aiBaseUrl = environment["KREADER_AI_BASE_URL"]?.trim()?.ifEmpty { null }
-                    ?: "https://api.deepseek.com",
+                    ?: "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 aiModel = environment["KREADER_AI_MODEL"]?.trim()?.ifEmpty { null }
-                    ?: "deepseek-v4-flash",
+                    ?: "qwen-plus",
                 maxAiInputChars = environment["KREADER_MAX_AI_INPUT_CHARS"]?.toIntOrNull()?.coerceIn(500, 20_000)
                     ?: 6_000,
                 maxAiRequestsPerMinute = environment["KREADER_MAX_AI_REQUESTS_PER_MINUTE"]?.toIntOrNull()

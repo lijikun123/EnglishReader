@@ -32,7 +32,7 @@ interface WebAiService {
     suspend fun phrases(text: String): List<AiPhrase>
 }
 
-class DeepSeekWebAiService(
+class OpenAiCompatibleWebAiService(
     private val config: AppConfig,
     private val client: HttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(15))

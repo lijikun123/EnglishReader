@@ -39,7 +39,7 @@ fun Application.kreaderModule(
     val passwordHasher = PasswordHasher()
     val tokenService = TokenService(config)
     val authAttemptGuard = AuthAttemptGuard(config.maxAuthAttemptsPerMinute)
-    val aiService = DeepSeekWebAiService(config)
+    val aiService = OpenAiCompatibleWebAiService(config)
     val aiRequestGuard = AiRequestGuard(config.maxAiRequestsPerMinute)
     database.migrate()
     monitor.subscribe(ApplicationStopped) { database.close() }
