@@ -1,6 +1,6 @@
 # KReader sync server
 
-现已附带网页版阅读器：原同步地址后加 `/web/` 即可访问，使用 App 原有账号阅读已同步书籍并同步进度。功能、部署和验证见 [WEB_READER.md](WEB_READER.md)。
+现已附带网页版阅读器：原同步地址后加 `/web/` 即可访问，使用 App 原有账号阅读已同步书籍、同步进度，并可启用服务端 AI 双语和词组讲解。功能、部署和验证见 [WEB_READER.md](WEB_READER.md)。
 
 KReader 的私有、按账号隔离的 Android 同步后端。它同步账号、书籍元数据、解析后的书籍内容包、阅读位置和书籍删除标记；不会上传 AI API Key、词典/AI 缓存或本地阅读排版设置。
 
@@ -21,7 +21,7 @@ cd server
 ../gradlew build
 ```
 
-运行前按 `deploy/.env.example` 设置 `KREADER_*` 和数据库变量。除启动入口外，所有 API 路由均需要 PostgreSQL。
+运行前按 `deploy/.env.example` 设置 `KREADER_*` 和数据库变量。除启动入口外，所有 API 路由均需要 PostgreSQL。网页版 AI 是可选功能：只在 VPS 的受保护 `.env` 中设置 `KREADER_AI_API_KEY`；不配置时阅读和同步照常工作，双语/词组按钮保持禁用。
 
 ## VPS 部署
 

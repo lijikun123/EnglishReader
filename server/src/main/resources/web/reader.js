@@ -30,6 +30,47 @@ export function paragraphOffset(text, paragraphIndex) {
   return offset;
 }
 
+export function paragraphsFor(text) {
+  if (!text) return [];
+  let start = 0;
+  return text.split("\n\n").map((value, index) => {
+    const paragraph = { index, start, end: start + value.length, text: value };
+    start = paragraph.end + 2;
+    return paragraph;
+  });
+}
+
+export function learningCacheKey(cacheVersion, contentSha256, chapterIndex, paragraphIndex, kind) {
+  return [cacheVersion, contentSha256, chapterIndex, paragraphIndex, kind].join("|");
+}
+
+export function phraseSegments(text, phrases) {
+  const ranges = [];
+  phrases.forEach((phrase, phraseIndex) => {
+    for (const fragment of phrase.fragments || []) {
+      if (!fragment) continue;
+      for (let start = text.indexOf(fragment); start >= 0; start = text.indexOf(fragment, start + fragment.length)) {
+        ranges.push({ start, end:start + fragment.length, phraseIndex });
+      }
+    }
+  });
+  ranges.sort((a,b) => a.start-b.start || b.end-a.end || a.phraseIndex-b.phraseIndex);
+  const accepted = [];
+  for (const range of ranges) {
+    if (!accepted.some(other => range.start < other.end && range.end > other.start)) accepted.push(range);
+  }
+  accepted.sort((a,b) => a.start-b.start);
+  const segments = [];
+  let cursor = 0;
+  for (const range of accepted) {
+    if (range.start > cursor) segments.push({ text:text.slice(cursor, range.start), phraseIndex:null });
+    segments.push({ text:text.slice(range.start, range.end), phraseIndex:range.phraseIndex });
+    cursor = range.end;
+  }
+  if (cursor < text.length || !segments.length) segments.push({ text:text.slice(cursor), phraseIndex:null });
+  return segments;
+}
+
 // Preserve every character, including line breaks and indentation. Do not parse book HTML.
 export function textBlocks(text, maxLength = 1400) {
   const blocks = [];
@@ -50,28 +91,71 @@ export function textBlocks(text, maxLength = 1400) {
 }
 
 export function renderText(container, text) {
+  renderLearningText(container, text);
+}
+
+export function renderLearningText(container, text, options = {}) {
   container.replaceChildren();
   const fragment = document.createDocumentFragment();
-  for (const block of textBlocks(text)) {
-    const element = document.createElement("span");
-    element.dataset.start = block.start;
-    element.dataset.end = block.end;
-    element.textContent = block.text;
+  const translations = options.translations || {};
+  const phrases = options.phrases || {};
+  const translationLoading = options.translationLoading || new Set();
+  for (const paragraph of paragraphsFor(text)) {
+    const element = document.createElement("p");
+    element.className = "reader-paragraph";
+    element.dataset.start = paragraph.start;
+    element.dataset.end = paragraph.end;
+    element.dataset.paragraphIndex = paragraph.index;
+    const english = document.createElement("span");
+    english.className = "paragraph-english";
+    for (const segment of phraseSegments(paragraph.text, phrases[paragraph.index] || [])) {
+      if (segment.phraseIndex === null) english.append(document.createTextNode(segment.text));
+      else {
+        const mark = document.createElement("button");
+        mark.type = "button";
+        mark.className = "phrase-mark";
+        mark.textContent = segment.text;
+        mark.setAttribute("aria-label", segment.text + "，查看词组讲解");
+        mark.addEventListener("click", () => options.onPhrase?.(phrases[paragraph.index][segment.phraseIndex], paragraph.text));
+        english.append(mark);
+      }
+    }
+    element.append(english);
+    if (Object.hasOwn(translations, paragraph.index) || translationLoading.has(paragraph.index)) {
+      const translated = document.createElement("span");
+      translated.className = "paragraph-translation" + (translationLoading.has(paragraph.index) ? " loading" : "");
+      translated.lang = "zh-CN";
+      translated.textContent = translationLoading.has(paragraph.index) ? "翻译中…" : translations[paragraph.index];
+      element.append(translated);
+    }
     fragment.append(element);
   }
   container.append(fragment);
 }
 
-function offsetNode(container, offset) {
-  const children = [...container.children];
+function offsetElement(container, offset) {
+  const children = [...container.querySelectorAll("[data-start][data-end]")];
   const element = children.find(el => Number(el.dataset.end) > offset) || children.at(-1);
-  if (!element?.firstChild) return null;
-  return { node: element.firstChild, offset: Math.min(element.textContent.length, Math.max(0, offset - Number(element.dataset.start))) };
+  if (!element) return null;
+  return { element, root:element.querySelector(".paragraph-english") || element,
+    offset:Math.max(0, offset - Number(element.dataset.start)) };
+}
+
+function textPoint(root, wanted) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node, remaining = wanted, last = null;
+  while ((node = walker.nextNode())) {
+    last = node;
+    if (remaining <= node.length) return { node, offset:remaining };
+    remaining -= node.length;
+  }
+  return last ? { node:last, offset:last.length } : null;
 }
 
 export function restoreOffset(scroller, container, offset) {
   if (offset <= 0) { scroller.scrollTop = 0; return; }
-  const point = offsetNode(container, offset);
+  const block = offsetElement(container, offset);
+  const point = block && textPoint(block.root, Math.min(block.root.textContent.length, block.offset));
   if (!point) { scroller.scrollTop = 0; return; }
   const range = document.createRange();
   range.setStart(point.node, point.offset);
@@ -84,15 +168,19 @@ export function visibleOffset(scroller, container) {
   if (!container.children.length) return 0;
   const targetY = scroller.getBoundingClientRect().top + 25;
   const element = [...container.children].find(el => el.getBoundingClientRect().bottom > targetY) || container.lastElementChild;
-  const node = element.firstChild;
-  if (!node) return Number(element.dataset.start);
+  const root = element.querySelector(".paragraph-english") || element;
+  const length = root.textContent.length;
+  if (!length) return Number(element.dataset.start);
   // Binary search line geometry instead of assuming all paragraphs have equal height.
   const range = document.createRange();
-  let low = 0, high = node.length;
+  let low = 0, high = length;
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
-    range.setStart(node, mid);
-    range.setEnd(node, Math.min(node.length, mid + 1));
+    const start = textPoint(root, mid);
+    const end = textPoint(root, Math.min(length, mid + 1));
+    if (!start || !end) break;
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
     const rect = range.getBoundingClientRect();
     if (rect.height && rect.bottom <= targetY) low = mid + 1;
     else high = mid;

@@ -1,7 +1,8 @@
 import { Api, apiBase, friendlyError } from "./api.js";
 import { AccountStore, accountScope } from "./store.js";
 import { SyncEngine, positionFor, loadBundle } from "./sync.js";
-import { chaptersFor, progressAt, paragraphOffset, renderText, restoreOffset, visibleOffset } from "./reader.js";
+import { chaptersFor, progressAt, paragraphOffset, paragraphsFor, learningCacheKey,
+  renderLearningText, restoreOffset, visibleOffset } from "./reader.js";
 
 const $ = id => document.getElementById(id);
 const api = new Api(apiBase(location.href));
@@ -9,6 +10,9 @@ let session, engine, state, active = null, syncTimer, saveTimer, saving = Promis
 let restoring = false, userScroll = false, generation = 0, openGeneration = 0, busySync = false;
 let savesInFlight = 0, unsaved = null;
 let statusText = "正在加载书架…";
+let aiStatus = { enabled:false, model:"", cacheVersion:"" };
+let learningPreferences = { bilingual:false, phrases:false };
+try { Object.assign(learningPreferences, JSON.parse(localStorage.getItem("kreader-learning"))); } catch {}
 let preferences = { fontSize: 22, lineHeight: "1.9", width: "760", theme: "light" };
 try { Object.assign(preferences, JSON.parse(localStorage.getItem("kreader-layout"))); } catch {}
 const scroller = $("reading-scroll"), content = $("book-text");
@@ -22,6 +26,13 @@ function status(text) {
   $("sync-status").textContent = text;
   $("reader-sync-status").textContent = text;
 }
+function updateLearningButtons() {
+  for (const [id, enabled] of [["bilingual-button",learningPreferences.bilingual],["phrases-button",learningPreferences.phrases]]) {
+    $(id).disabled = !aiStatus.enabled;
+    $(id).setAttribute("aria-pressed", String(aiStatus.enabled && enabled));
+    $(id).title = aiStatus.enabled ? "由 VPS 上配置的 " + aiStatus.model + " 提供" : "VPS 尚未配置 AI API Key";
+  }
+}
 function samePosition(a, b) {
   return a && b && a.chapterIndex === b.chapterIndex && a.charOffset === b.charOffset;
 }
@@ -29,6 +40,7 @@ function showLogin(error) {
   generation++; openGeneration++;
   clearTimeout(syncTimer); clearTimeout(saveTimer);
   active = null; engine = null; state = null; session = null; unsaved = null;
+  aiStatus = { enabled:false, model:"", cacheVersion:"" }; updateLearningButtons();
   content.replaceChildren(); $("books").replaceChildren(); $("toc-list").replaceChildren();
   document.querySelectorAll("dialog[open]").forEach(d => d.close());
   document.body.classList.remove("reading");
@@ -127,6 +139,12 @@ async function startSession() {
   try { state = await engine.store.read(); }
   catch (error) { return showLogin(error); }
   if (generation !== runGeneration) return;
+  try { aiStatus = await api.json("v1/ai/status", session.user.id); }
+  catch (error) {
+    if (error.status === 401) return showLogin(error);
+    aiStatus = { enabled:false, model:"", cacheVersion:"" };
+  }
+  updateLearningButtons();
   $("login-view").hidden = true; $("library-view").hidden = false; $("reader-view").hidden = true;
   $("account").hidden = false; $("account-email").textContent = session.user.email;
   errorAt("library-error", null); renderLibrary();
@@ -143,10 +161,11 @@ async function openBook(bookId, button) {
     if (!book?.ready) throw new Error("书籍正文尚未就绪，请稍后同步书架。");
     const bundle = await loadBundle(api, session.user.id, book);
     if (runGeneration !== generation || token !== openGeneration) return;
-    active = { book, bundle, chapters: chaptersFor(bundle), offset: 0, remote: null, lastSaved: null };
+    active = { book, bundle, chapters: chaptersFor(bundle), offset: 0, remote: null, lastSaved: null,
+      translations:{}, phrases:{}, translationLoading:new Set(), learningEpoch:0 };
     $("book-title").textContent = book.title;
     $("library-view").hidden = true; $("reader-view").hidden = false;
-    document.body.classList.add("reading"); errorAt("reader-error", null);
+    document.body.classList.add("reading"); errorAt("reader-error", null); errorAt("learning-error", null);
     const position = positionFor(state, bookId);
     showChapter(position?.chapterIndex ?? active.chapters[0].chapterIndex, position?.charOffset || 0);
     $("remote-banner").hidden = true;
@@ -183,9 +202,128 @@ function showChapter(index, offset = 0) {
   $("chapter-title").textContent = active.chapter.title || "正文";
   $("chapter-label").textContent = active.chapter.title || "正文";
   $("chapter-end").textContent = active.chapter === active.chapters.at(-1) ? "— 全书结束 —" : "— 本章结束 —";
-  renderText(content, active.chapter.content);
+  active.learningEpoch++;
+  active.translations = {}; active.phrases = {}; active.translationLoading = new Set();
+  errorAt("learning-error", null);
+  hydrateLearningCache();
+  renderChapterLearning(false);
   scroller.scrollTop = 0; restore(active.offset); updateFooter();
+  beginLearning(active.learningEpoch);
 }
+
+function currentLearningKey(kind, paragraphIndex, current = active) {
+  return learningCacheKey(aiStatus.cacheVersion, current.book.contentSha256,
+    current.chapter.chapterIndex, paragraphIndex, kind);
+}
+
+function hydrateLearningCache() {
+  if (!active || !state?.aiCache) return;
+  for (const paragraph of paragraphsFor(active.chapter.content)) {
+    const translation = state.aiCache[currentLearningKey("translation", paragraph.index)];
+    const phrases = state.aiCache[currentLearningKey("phrases", paragraph.index)];
+    if (translation) active.translations[paragraph.index] = translation.value;
+    if (phrases) active.phrases[paragraph.index] = phrases.value;
+  }
+}
+
+function showPhrase(phrase, source) {
+  $("phrase-title").textContent = phrase.phrase;
+  $("phrase-type").textContent = phrase.type || "精读词组";
+  $("phrase-explanation").textContent = phrase.explanation || "暂无讲解。";
+  $("phrase-source").textContent = source;
+  $("phrase-dialog").showModal();
+}
+
+function renderChapterLearning(preserve = true) {
+  if (!active) return;
+  const anchor = preserve && content.children.length ? visibleOffset(scroller, content) : active.offset;
+  if (preserve) active.offset = anchor;
+  renderLearningText(content, active.chapter.content, {
+    translations:learningPreferences.bilingual ? active.translations : {},
+    translationLoading:learningPreferences.bilingual ? active.translationLoading : new Set(),
+    phrases:learningPreferences.phrases ? active.phrases : {},
+    onPhrase:showPhrase,
+  });
+  if (preserve) restore(anchor);
+}
+
+async function saveLearningCache(key, value, current, epoch) {
+  const mine = engine;
+  if (!mine || current !== active || current.learningEpoch !== epoch) return false;
+  const next = await mine.store.transact(saved => {
+    saved.aiCache ||= {};
+    saved.aiCache[key] = { value, savedAt:Date.now() };
+    const entries = Object.entries(saved.aiCache);
+    if (entries.length > 4000) {
+      entries.sort((a,b) => (a[1].savedAt || 0) - (b[1].savedAt || 0));
+      for (const [oldKey] of entries.slice(0, entries.length - 4000)) delete saved.aiCache[oldKey];
+    }
+  });
+  if (mine === engine) state = next;
+  return current === active && current.learningEpoch === epoch;
+}
+
+function beginLearning(epoch) {
+  if (!active || !aiStatus.enabled) return;
+  if (learningPreferences.bilingual) processLearning("translation", epoch);
+  if (learningPreferences.phrases) processLearning("phrases", epoch);
+}
+
+async function processLearning(kind, epoch) {
+  const current = active;
+  if (!current || current.learningEpoch !== epoch) return;
+  const paragraphs = paragraphsFor(current.chapter.content);
+  const starting = Math.max(0, paragraphs.findIndex(p => p.end > current.offset));
+  const queue = [...paragraphs.slice(starting), ...paragraphs.slice(0, starting).reverse()]
+    .filter(p => !Object.hasOwn(kind === "translation" ? current.translations : current.phrases, p.index));
+  let stopped = false;
+  const worker = async () => {
+    while (!stopped && queue.length && current === active && current.learningEpoch === epoch) {
+      const paragraph = queue.shift();
+      const enabled = kind === "translation" ? learningPreferences.bilingual : learningPreferences.phrases;
+      if (!enabled) break;
+      if (kind === "translation") {
+        current.translationLoading.add(paragraph.index);
+        renderChapterLearning();
+      }
+      try {
+        const result = await api.json("v1/ai/" + (kind === "translation" ? "translate" : "phrases"), session.user.id, {
+          bookId:current.book.bookId,
+          contentSha256:current.book.contentSha256,
+          chapterIndex:current.chapter.chapterIndex,
+          paragraphIndex:paragraph.index,
+          text:paragraph.text,
+        });
+        const value = kind === "translation" ? result.translation : result.phrases;
+        const key = currentLearningKey(kind, paragraph.index, current);
+        if (!await saveLearningCache(key, value, current, epoch)) break;
+        if (kind === "translation") current.translations[paragraph.index] = value;
+        else current.phrases[paragraph.index] = value;
+      } catch (error) {
+        stopped = true;
+        if (current === active && current.learningEpoch === epoch) errorAt("learning-error", error);
+      } finally {
+        if (kind === "translation") current.translationLoading.delete(paragraph.index);
+        if (current === active && current.learningEpoch === epoch) renderChapterLearning();
+      }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+}
+
+function toggleLearning(kind) {
+  if (!aiStatus.enabled) return;
+  learningPreferences[kind] = !learningPreferences[kind];
+  try { localStorage.setItem("kreader-learning", JSON.stringify(learningPreferences)); } catch {}
+  updateLearningButtons();
+  if (!active) return;
+  active.learningEpoch++;
+  active.translationLoading.clear();
+  errorAt("learning-error", null);
+  renderChapterLearning();
+  beginLearning(active.learningEpoch);
+}
+
 function persist(atEnd = false) {
   clearTimeout(saveTimer); saveTimer = null;
   if (!active || !engine) return saving;
@@ -290,6 +428,8 @@ $("sync-button").addEventListener("click", () => syncNow(true));
 $("back").addEventListener("click", () => returnToLibrary());
 $("previous-page").addEventListener("click", () => page(-1));
 $("next-page").addEventListener("click", () => page(1));
+$("bilingual-button").addEventListener("click", () => toggleLearning("bilingual"));
+$("phrases-button").addEventListener("click", () => toggleLearning("phrases"));
 $("toc-button").addEventListener("click", openToc);
 $("settings-button").addEventListener("click", () => $("settings-dialog").showModal());
 document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => $(button.dataset.close).close()));
@@ -308,7 +448,10 @@ $("settings-dialog").addEventListener("input", () => {
   if (active) restore(active.offset);
 });
 scroller.addEventListener("scroll", captureScroll, { passive:true });
-for (const event of ["wheel","touchmove","pointerdown"]) scroller.addEventListener(event, () => { userScroll = true; }, { passive:true });
+for (const event of ["wheel","touchmove"]) scroller.addEventListener(event, () => { userScroll = true; }, { passive:true });
+scroller.addEventListener("pointerdown", event => {
+  if (!event.target.closest("button")) userScroll = true;
+}, { passive:true });
 document.addEventListener("keydown", event => {
   if (!active || document.querySelector("dialog[open]") ||
       /INPUT|SELECT|TEXTAREA|BUTTON/.test(event.target.tagName) || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -336,6 +479,7 @@ window.addEventListener("storage", event => {
 window.addEventListener("resize", () => { if (active) restore(active.offset); });
 setInterval(() => { if (!document.hidden) syncNow(); }, 15000);
 applyPreferences();
+updateLearningButtons();
 if (!globalThis.isSecureContext || !crypto.subtle || !crypto.randomUUID || !globalThis.indexedDB || !navigator.locks) {
   $("login-button").disabled = true;
   errorAt("login-error", new Error("请用最新版 Chrome、Edge、Firefox 或 Safari，通过 HTTPS 打开此页面。"));

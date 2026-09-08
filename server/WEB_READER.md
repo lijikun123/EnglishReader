@@ -6,9 +6,31 @@
 
 更新服务端后访问 `https://your-domain/kreader-sync/web/`，本机开发访问 `http://localhost:8080/web/`。使用 **App 中同一个同步账号**登录。先在 App 中完成一次同步；只在手机本地、尚未同步的书籍不会出现在网页书架。没有账号时仍使用 App 原有注册流程。
 
-支持云端已有 TXT、Markdown、无 DRM EPUB 的纯文本正文、EPUB 目录和段落锚点，可翻页、滚动、切换章节，调整字号、行距、宽度和浅色/护眼/深色主题。
+支持云端已有 TXT、Markdown、无 DRM EPUB 的纯文本正文、EPUB 目录和段落锚点，可翻页、滚动、切换章节，调整字号、行距、宽度和浅色/护眼/深色主题；配置服务端 AI 后还可显示双语段落和词组讲解。
 
-不提供上传、导入、下载文件、删除书籍、注册、生词本、词典或 AI 功能。打开书籍会通过已有接口加载正文，不会生成下载文件或导出入口。Markdown 和 EPUB 按 App 已解析的文本展示，不执行书籍中的 HTML。
+不提供上传、导入、下载文件、删除书籍、注册、生词本或词典功能。打开书籍会通过已有接口加载正文，不会生成下载文件或导出入口。Markdown 和 EPUB 按 App 已解析的文本展示，不执行书籍中的 HTML。
+
+## 双语与词组
+
+- “双语”按段落显示自然中文译文；“词组”识别熟词僻义、固定搭配、学术语块和句型，点击正文中的加粗标记查看中文讲解。
+- 浏览器只调用同源、需要登录的 `/v1/ai/*` 接口。AI Key 由 VPS 读取，不会发送给浏览器或写入 GitHub。
+- 服务端复用 App 的精读提示词，默认调用 `https://api.deepseek.com/chat/completions` 和 `deepseek-v4-flash`；Base URL 与模型都可通过环境变量替换为其他兼容服务。
+- 译文和词组按账号、模型、书籍正文版本、章节及段落缓存在当前浏览器的 IndexedDB。刷新和重开后复用缓存；App 现有本地缓存不会上传，因此网页不会直接复用手机上已经生成的结果。
+- 同一时刻最多发出 2 个上游请求，服务端默认每个账号每分钟最多 60 个 AI 请求。失败结果不缓存。
+- 发送给 AI 服务的内容仅是当前需要处理的英文段落。开启功能表示允许将这些段落发送给 VPS 配置的 AI 提供商。
+- 中文译文使用独立 DOM 展示，阅读位置始终按英文原文的 UTF-16 偏移计算；切换双语、词组或排版不会产生进度写入。
+
+在 VPS 的 `deploy/.env` 中配置：
+
+```dotenv
+KREADER_AI_API_KEY=你的_API_Key
+KREADER_AI_BASE_URL=https://api.deepseek.com
+KREADER_AI_MODEL=deepseek-v4-flash
+KREADER_MAX_AI_INPUT_CHARS=6000
+KREADER_MAX_AI_REQUESTS_PER_MINUTE=60
+```
+
+`.env` 应保持权限 `600` 且绝不能提交到 Git。没有配置 Key 时，AI 状态接口会报告禁用，阅读、书架和进度同步不受影响。
 
 ## 进度同步
 
@@ -24,7 +46,7 @@
 
 ## 登录与存储
 
-正文仅保存在页面内存。书架、同步游标、待同步进度按“服务地址 + 用户 ID”隔离保存在 IndexedDB；退出后待同步进度仍保留，重新登录同一账号会继续同步，其他账号不会读取它。
+正文仅保存在页面内存。书架、同步游标、待同步进度、AI 译文和词组缓存按“服务地址 + 用户 ID”隔离保存在 IndexedDB；退出后待同步进度仍保留，重新登录同一账号会继续同步，其他账号不会读取它。
 
 为支持重新打开网页和多标签页，现有 API 的 access/refresh token 保存在当前站点 localStorage；不保存密码。刷新 token 由 Web Locks 串行处理。显式退出会撤销当前 refresh token 并清除本地登录凭据；登录过期则要求重新登录。公用电脑使用后请退出登录。
 
@@ -67,7 +89,7 @@ curl --fail -o /dev/null http://127.0.0.1:18080/web/
 客户端同步/兼容性（Node 22+，无 npm 依赖）：
 
 ```sh
-node --test server/web-tests/sync.test.mjs
+node --test server/web-tests/*.test.mjs
 ```
 
 浏览器流程使用本地假同步服务和测试书籍，不会登录或写入线上账号。如环境已安装 Playwright 和 Chrome：

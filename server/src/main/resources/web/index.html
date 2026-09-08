@@ -46,10 +46,16 @@
       <header class="reader-toolbar">
         <button id="back" class="quiet">← <span>书架</span></button>
         <div class="reader-heading"><strong id="book-title"></strong><span id="chapter-label"></span></div>
-        <button id="toc-button" aria-haspopup="dialog">目录</button><button id="settings-button" aria-haspopup="dialog" aria-label="阅读设置">Aa</button>
+        <div class="reader-actions">
+          <button id="bilingual-button" class="learning-button" aria-pressed="false">双语</button>
+          <button id="phrases-button" class="learning-button" aria-pressed="false">词组</button>
+          <button id="toc-button" aria-haspopup="dialog">目录</button>
+          <button id="settings-button" aria-haspopup="dialog" aria-label="阅读设置">Aa</button>
+        </div>
       </header>
       <div id="remote-banner" class="remote-banner" hidden><span>其他设备更新了阅读位置。</span><button id="use-remote">接着读</button><button id="keep-position" class="quiet">留在此处</button></div>
       <p id="reader-error" class="error reader-error" role="alert" hidden></p>
+      <p id="learning-error" class="error reader-error" role="alert" hidden></p>
       <div id="reading-scroll" class="reading-scroll" tabindex="0" aria-label="书籍正文，使用空格或方向键翻页">
         <article id="article" class="article" lang="en"><h1 id="chapter-title" tabindex="-1"></h1><div id="book-text" class="book-text"></div><p class="chapter-end" id="chapter-end">— 本章结束 —</p></article>
       </div>
@@ -63,6 +69,11 @@
     <label for="reader-width">阅读宽度</label><select id="reader-width"><option value="620">窄</option><option value="760" selected>适中</option><option value="960">宽</option></select>
     <fieldset><legend>主题</legend><div class="theme-options"><label><input type="radio" name="theme" value="light" checked>浅色</label><label><input type="radio" name="theme" value="sepia">护眼</label><label><input type="radio" name="theme" value="dark">深色</label></div></fieldset>
     <p class="muted small">排版设置仅保存在此浏览器。</p>
+  </dialog>
+  <dialog id="phrase-dialog" aria-labelledby="phrase-title">
+    <div class="dialog-heading"><div><span id="phrase-type" class="phrase-type"></span><h2 id="phrase-title"></h2></div><button class="quiet" data-close="phrase-dialog" aria-label="关闭词组讲解">✕</button></div>
+    <p id="phrase-explanation" class="phrase-explanation"></p>
+    <p id="phrase-source" class="phrase-source"></p>
   </dialog>
   <noscript>请启用 JavaScript，以登录账号并同步阅读进度。</noscript>
 </body>

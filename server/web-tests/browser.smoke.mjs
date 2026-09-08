@@ -17,7 +17,7 @@ const bundle = { schemaVersion:1, format:"EPUB", content:"", chapters:[
 const raw=Buffer.from(JSON.stringify(bundle));
 const book={bookId,title:"Pride and Prejudice",author:"Jane Austen",contentType:"NOVEL",format:"EPUB",
   contentSha256:createHash("sha256").update(raw).digest("hex"),contentBytes:raw.length,contentRevision:1};
-const changes=[], writes=[], tokens=new Map();
+const changes=[], writes=[], aiRequests=[], tokens=new Map();
 let refreshes=0;
 function append(kind,payload,occurredAt=Date.now()) {
   changes.push({cursor:changes.length+1,kind,entityId:bookId,revision:changes.length+1,payload,occurredAt,serverUpdatedAt:Date.now()});
@@ -53,6 +53,15 @@ const server=http.createServer(async(req,res)=>{
     const identity=tokens.get(req.headers.authorization?.replace("Bearer ",""));
     if(!identity)return json({code:"unauthorized"},401);
     if(path===basePath+"v1/auth/logout"){return res.writeHead(204).end();}
+    if(path===basePath+"v1/ai/status")return json({enabled:true,model:"test-model",cacheVersion:"web-ai-v1:test-model"});
+    if(path===basePath+"v1/ai/translate") {
+      aiRequests.push({kind:"translation",...data});
+      return json({translation:"这是一段用于浏览器测试的自然中文译文。"});
+    }
+    if(path===basePath+"v1/ai/phrases") {
+      aiRequests.push({kind:"phrases",...data});
+      return json({phrases:[{phrase:"universally acknowledged",type:"固定搭配",fragments:["universally acknowledged"],explanation:"表示某事得到普遍承认。"}]});
+    }
     if(path===basePath+"v1/sync/pull") {
       const cursor=Number(new URL(req.url,"http://localhost").searchParams.get("cursor")||0);
       const list=identity.user==="alice"?changes.filter(c=>c.cursor>cursor):[];
@@ -92,6 +101,17 @@ try {
   await p.getByRole("button",{name:"继续阅读 →"}).click();
   await p.locator("#reader-view").waitFor({state:"visible"});
   await p.waitForFunction(()=>document.getElementById("reading-scroll").scrollTop>0);
+  const beforeLearning=writes.length;
+  await p.locator("#bilingual-button").click();
+  await p.locator(".paragraph-translation").filter({hasText:"自然中文译文"}).first().waitFor();
+  await p.locator("#phrases-button").click();
+  await p.locator(".phrase-mark").first().waitFor();
+  await p.locator(".phrase-mark").first().click();
+  await p.locator("#phrase-dialog[open]").waitFor();
+  assert.equal(await p.locator("#phrase-title").textContent(),"universally acknowledged");
+  await p.locator('[data-close="phrase-dialog"]').click();
+  assert.equal(writes.length,beforeLearning,"AI display must not write reading progress");
+  assert.ok(aiRequests.some(r=>r.kind==="translation")&&aiRequests.some(r=>r.kind==="phrases"));
   const atOpen=writes.length;
   await p.locator("#settings-button").click();
   await p.locator("#font-size").fill("28");

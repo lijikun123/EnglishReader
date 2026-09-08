@@ -120,9 +120,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ### 网页版（新增，保留 Android App 0.1.21）
 
-同步服务附带网页阅读器。更新服务端后，在原同步地址后加 `/web/`，使用 App 的同一账号登录，即可加载已同步的书籍并同步阅读位置。支持 TXT / Markdown / EPUB 纯文本阅读、目录、翻页和阅读排版设置，不提供上传、下载文件或删除书籍功能。
+同步服务附带网页阅读器。更新服务端后，在原同步地址后加 `/web/`，使用 App 的同一账号登录，即可加载已同步的书籍并同步阅读位置。支持 TXT / Markdown / EPUB 纯文本阅读、目录、翻页、双语段落、AI 词组讲解和阅读排版设置，不提供上传、下载文件或删除书籍功能。
 
-网页与现有 API 同源，复用账号、数据库和进度协议，无需改动 App 或同步地址。部署与验证说明见 [`server/WEB_READER.md`](server/WEB_READER.md)。
+网页与现有 API 同源，复用账号、数据库和进度协议，无需改动 App 或同步地址。AI Key 只配置在 VPS 环境变量中，不进入网页或 GitHub；词典仍待导入 VPS。部署与验证说明见 [`server/WEB_READER.md`](server/WEB_READER.md)。
 
 服务端在 [`server/`](server/) 下，是与 Android 工程分离的 Kotlin/Ktor + PostgreSQL 项目。部署说明见 [`server/README.md`](server/README.md)。
 

@@ -473,6 +473,21 @@ class KreaderDatabase private constructor(
         }
     }
 
+    fun assertActiveBookContent(userId: UUID, bookId: UUID, contentSha256: String) = withConnection { connection ->
+        connection.prepareStatement(
+            "SELECT 1 FROM books WHERE id = ? AND user_id = ? AND LOWER(content_sha256) = ? AND bundle_ready = TRUE AND deleted_at IS NULL",
+        ).use { statement ->
+            statement.setObject(1, bookId)
+            statement.setObject(2, userId)
+            statement.setString(3, contentSha256)
+            statement.executeQuery().use { result ->
+                if (!result.next()) {
+                    throw ApiException(HttpStatusCode.NotFound, "book_not_found", "Book or current content version not found")
+                }
+            }
+        }
+    }
+
     private fun applyBookUpsert(
         connection: Connection,
         userId: UUID,

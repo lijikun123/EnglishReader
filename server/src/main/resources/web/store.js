@@ -1,6 +1,11 @@
 // A transaction keeps the sync cursor, remote snapshot and pending writes consistent.
 export function emptyState() {
-  return { cursor: 0, books: {}, positions: {}, pending: {}, errors: {}, serverOffset: 0, lastLocalTime: 0 };
+  return { cursor: 0, books: {}, positions: {}, pending: {}, errors: {}, aiCache: {}, serverOffset: 0, lastLocalTime: 0 };
+}
+
+function normalizeState(state) {
+  state.aiCache ||= {};
+  return state;
 }
 
 export class AccountStore {
@@ -22,7 +27,7 @@ export class AccountStore {
       let state;
       request.onsuccess = () => {
         try {
-          state = request.result || emptyState();
+          state = normalizeState(request.result || emptyState());
           update(state); // Synchronous callback: no network awaits inside an IDB transaction.
           store.put(state, this.scope);
         } catch (error) { reject(error); tx.abort(); }
@@ -35,7 +40,7 @@ export class AccountStore {
     const db = await this.ready;
     return new Promise((resolve, reject) => {
       const request = db.transaction("accounts").objectStore("accounts").get(this.scope);
-      request.onsuccess = () => resolve(request.result || emptyState());
+      request.onsuccess = () => resolve(normalizeState(request.result || emptyState()));
       request.onerror = () => reject(request.error);
     });
   }

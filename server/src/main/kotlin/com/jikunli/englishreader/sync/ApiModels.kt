@@ -145,3 +145,37 @@ data class BundleReceipt(
     val contentBytes: Long,
     val updatedAt: Long,
 )
+
+@Serializable
+data class AiStatusResponse(
+    val enabled: Boolean,
+    val model: String,
+    val cacheVersion: String,
+)
+
+@Serializable
+data class AiParagraphRequest(
+    val bookId: String,
+    val contentSha256: String,
+    val chapterIndex: Int,
+    val paragraphIndex: Int,
+    val text: String,
+)
+
+@Serializable
+data class AiTranslationResponse(
+    val translation: String,
+)
+
+@Serializable
+data class AiPhrase(
+    val phrase: String,
+    val type: String,
+    val fragments: List<String>,
+    val explanation: String,
+)
+
+@Serializable
+data class AiPhrasesResponse(
+    val phrases: List<AiPhrase>,
+)

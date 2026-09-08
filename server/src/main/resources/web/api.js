@@ -28,7 +28,7 @@ export class Api {
   clear() { this.storage.removeItem(this.key); }
   async raw(path, { token, body, keepalive = false } = {}) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
+    const timeout = setTimeout(() => controller.abort(), path.startsWith("v1/ai/") ? 90000 : 25000);
     try {
       const response = await this.transport(new URL(path, this.base), {
         method: body === undefined ? "GET" : "POST",
@@ -46,7 +46,7 @@ export class Api {
       const bytes = await response.arrayBuffer();
       return new Response(bytes, { status: response.status, headers: response.headers });
     } catch (error) {
-      if (error.name === "AbortError") throw new Error("连接超时，进度会保留并稍后重试。");
+      if (error.name === "AbortError") throw new Error(path.startsWith("v1/ai/") ? "AI 响应超时，请稍后重试。" : "连接超时，进度会保留并稍后重试。");
       throw error;
     } finally { clearTimeout(timeout); }
   }
@@ -129,6 +129,14 @@ export function friendlyError(error) {
     bundle_not_found: "书籍正文尚未就绪，请先在 App 中完成同步。",
     book_deleted: "这本书已在其他设备删除。",
     clock_skew: "设备时间异常，请校准系统时间后重试。",
+    ai_not_configured: "VPS 尚未配置 AI API Key。配置后重新打开网页即可使用双语和词组功能。",
+    ai_credentials_invalid: "VPS 上的 AI API Key 无效，请重新配置。",
+    ai_rate_limited: "本分钟的 AI 请求较多，请稍后再试。",
+    ai_upstream_rate_limited: "AI 服务当前繁忙，请稍后再试。",
+    ai_unavailable: "暂时无法连接 AI 服务，请稍后再试。",
+    ai_upstream_error: "AI 服务请求失败，请稍后再试。",
+    ai_invalid_response: "AI 返回了无法识别的结果，请重试。",
+    ai_input_invalid: "这个段落过长或内容无效，暂时无法处理。",
   };
   return messages[error.code] || (error instanceof TypeError ? "暂时无法连接服务器，请检查网络后重试。" : error.message) || "操作失败，请重试。";
 }

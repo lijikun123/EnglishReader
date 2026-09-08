@@ -39,6 +39,8 @@ fun Application.kreaderModule(
     val passwordHasher = PasswordHasher()
     val tokenService = TokenService(config)
     val authAttemptGuard = AuthAttemptGuard(config.maxAuthAttemptsPerMinute)
+    val aiService = DeepSeekWebAiService(config)
+    val aiRequestGuard = AiRequestGuard(config.maxAiRequestsPerMinute)
     database.migrate()
     monitor.subscribe(ApplicationStopped) { database.close() }
     monitor.subscribe(ApplicationStarted) {
@@ -89,6 +91,7 @@ fun Application.kreaderModule(
         authRoutes(config, database, passwordHasher, tokenService, authAttemptGuard)
         authenticate("auth-jwt") {
             authenticatedRoutes(config, database, tokenService)
+            webAiRoutes(config, database, aiService, aiRequestGuard)
         }
     }
 }

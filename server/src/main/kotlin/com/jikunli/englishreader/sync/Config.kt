@@ -13,6 +13,11 @@ data class AppConfig(
     val maxBundleBytes: Long,
     val maxJsonBytes: Long,
     val maxAuthAttemptsPerMinute: Int,
+    val aiApiKey: String?,
+    val aiBaseUrl: String,
+    val aiModel: String,
+    val maxAiInputChars: Int,
+    val maxAiRequestsPerMinute: Int,
 ) {
     companion object {
         fun fromEnvironment(environment: Map<String, String> = System.getenv()): AppConfig {
@@ -40,6 +45,17 @@ data class AppConfig(
                 maxBundleBytes = environment["KREADER_MAX_BUNDLE_BYTES"]?.toLongOrNull() ?: 26_214_400L,
                 maxJsonBytes = environment["KREADER_MAX_JSON_BYTES"]?.toLongOrNull() ?: 65_536L,
                 maxAuthAttemptsPerMinute = environment["KREADER_MAX_AUTH_ATTEMPTS_PER_MINUTE"]?.toIntOrNull() ?: 10,
+                // AI is optional. Without a key the reader still works and reports
+                // the feature as unavailable instead of failing at startup.
+                aiApiKey = environment["KREADER_AI_API_KEY"]?.trim()?.takeIf { it.isNotEmpty() },
+                aiBaseUrl = environment["KREADER_AI_BASE_URL"]?.trim()?.ifEmpty { null }
+                    ?: "https://api.deepseek.com",
+                aiModel = environment["KREADER_AI_MODEL"]?.trim()?.ifEmpty { null }
+                    ?: "deepseek-v4-flash",
+                maxAiInputChars = environment["KREADER_MAX_AI_INPUT_CHARS"]?.toIntOrNull()?.coerceIn(500, 20_000)
+                    ?: 6_000,
+                maxAiRequestsPerMinute = environment["KREADER_MAX_AI_REQUESTS_PER_MINUTE"]?.toIntOrNull()
+                    ?.coerceIn(1, 300) ?: 60,
             )
         }
     }
