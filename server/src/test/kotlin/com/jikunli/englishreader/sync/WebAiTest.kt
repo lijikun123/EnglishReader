@@ -65,6 +65,30 @@ class WebAiTest {
     }
 
     @Test
+    fun discontinuousPhraseOnlyHighlightsItsFixedParts() {
+        val source = "Dr Sagan has been awarded the NASA Medals for Exceptional Scientific Achievement."
+        val raw = """[
+            {
+              "phrase":"has been awarded ... for ...",
+              "type":"句型",
+              "fragments":["has been awarded","for Exceptional Scientific Achievement"],
+              "explanation":"be awarded A for B：因 B 被授予 A。"
+            }
+        ]"""
+        assertEquals(
+            listOf(
+                AiPhrase(
+                    "has been awarded ... for ...",
+                    "句型",
+                    listOf("has been awarded", "for"),
+                    "be awarded A for B：因 B 被授予 A。",
+                ),
+            ),
+            parsePhraseContent(raw, source),
+        )
+    }
+
+    @Test
     fun bailianRequestsDisableThinkingForFastReadingTasks() {
         assertTrue(isDashscopeEndpoint(URI("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")))
         assertFalse(isDashscopeEndpoint(URI("https://api.deepseek.com/chat/completions")))

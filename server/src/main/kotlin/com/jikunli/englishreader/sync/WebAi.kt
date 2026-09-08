@@ -147,19 +147,31 @@ internal fun parsePhraseContent(raw: String, source: String): List<AiPhrase> {
     catch (_: Exception) { return emptyList() }
     return array.mapNotNull { element ->
         val item = element as? JsonObject ?: return@mapNotNull null
-        val fragments = (item["fragments"] as? JsonArray).orEmpty().mapNotNull {
+        val declaredFragments = (item["fragments"] as? JsonArray).orEmpty().mapNotNull {
             (it as? JsonPrimitive)?.contentOrNull?.trim()
                 ?.takeIf { fragment -> fragment.isNotEmpty() && source.contains(fragment) }
         }.distinct().take(8)
-        if (fragments.isEmpty()) return@mapNotNull null
+        if (declaredFragments.isEmpty()) return@mapNotNull null
+        val phrase = (item["phrase"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+            .ifEmpty { declaredFragments.first() }.take(200)
+        val fixedPatternFragments = discontinuousPhraseFragments(phrase, source)
+        val fragments = fixedPatternFragments.ifEmpty { declaredFragments }
         AiPhrase(
-            phrase = (item["phrase"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
-                .ifEmpty { fragments.first() }.take(200),
+            phrase = phrase,
             type = (item["type"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty().take(40),
             fragments = fragments,
             explanation = (item["explanation"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty().take(2_000),
         )
     }.take(6)
+}
+
+internal fun discontinuousPhraseFragments(phrase: String, source: String): List<String> {
+    if (!phrase.contains("...") && !phrase.contains('…') && !phrase.contains('⋯')) return emptyList()
+    return phrase.split(Regex("""\s*(?:\.{3,}|…+|⋯+)\s*"""))
+        .map(String::trim)
+        .filter { it.isNotEmpty() && source.contains(it) }
+        .distinct()
+        .take(8)
 }
 
 private fun chatEndpoint(baseUrl: String): URI {
