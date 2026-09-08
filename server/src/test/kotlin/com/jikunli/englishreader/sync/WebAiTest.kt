@@ -1,9 +1,13 @@
 package com.jikunli.englishreader.sync
 
 import io.ktor.http.HttpStatusCode
+import java.net.URI
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class WebAiTest {
     private val requiredEnvironment = mapOf(
@@ -58,6 +62,20 @@ class WebAiTest {
             listOf(AiPhrase("take cues from", "固定搭配", listOf("take cues from"), "借鉴")),
             parsePhraseContent(raw, "Writers take cues from earlier work."),
         )
+    }
+
+    @Test
+    fun bailianRequestsDisableThinkingForFastReadingTasks() {
+        assertTrue(isDashscopeEndpoint(URI("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")))
+        assertFalse(isDashscopeEndpoint(URI("https://api.deepseek.com/chat/completions")))
+    }
+
+    @Test
+    fun webPhrasePromptKeepsAppRulesAndLimitsHighlightToFixedExpression() {
+        val prompt = phrasePrompt("Dr Sagan has been awarded the medal for science.")
+        assertContains(prompt, "touchstone=公认基准而非试金石")
+        assertContains(prompt, "not only...but also")
+        assertContains(prompt, "fragments=[\"has been awarded\",\"for\"]")
     }
 
     @Test

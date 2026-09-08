@@ -54,7 +54,7 @@ const server=http.createServer(async(req,res)=>{
     const identity=tokens.get(req.headers.authorization?.replace("Bearer ",""));
     if(!identity)return json({code:"unauthorized"},401);
     if(path===basePath+"v1/auth/logout"){return res.writeHead(204).end();}
-    if(path===basePath+"v1/ai/status")return json({enabled:aiEnabled,model:"test-model",cacheVersion:"web-ai-v1:test-model"});
+    if(path===basePath+"v1/ai/status")return json({enabled:aiEnabled,model:"test-model",cacheVersion:"web-ai-v2:test-model"});
     if(path===basePath+"v1/ai/translate") {
       aiRequests.push({kind:"translation",...data});
       return json({translation:"这是一段用于浏览器测试的自然中文译文。"});
@@ -107,6 +107,13 @@ try {
   await p.locator(".paragraph-translation").filter({hasText:"自然中文译文"}).first().waitFor();
   await p.locator("#phrases-button").click();
   await p.locator(".phrase-mark").first().waitFor();
+  const phraseStyle=await p.locator(".phrase-mark").first().evaluate(el=>{
+    const style=getComputedStyle(el);
+    return {backgroundColor:style.backgroundColor,borderBottomWidth:style.borderBottomWidth,fontWeight:style.fontWeight};
+  });
+  assert.equal(phraseStyle.backgroundColor,"rgba(0, 0, 0, 0)");
+  assert.equal(phraseStyle.borderBottomWidth,"0px");
+  assert.ok(Number(phraseStyle.fontWeight)>=700);
   await p.locator(".phrase-mark").first().click();
   await p.locator("#phrase-dialog[open]").waitFor();
   assert.equal(await p.locator("#phrase-title").textContent(),"universally acknowledged");
