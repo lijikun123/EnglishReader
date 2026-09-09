@@ -2,13 +2,15 @@ import { Api, apiBase, friendlyError } from "./api.js";
 import { AccountStore, accountScope } from "./store.js";
 import { SyncEngine, positionFor, loadBundle } from "./sync.js";
 import { chaptersFor, progressAt, paragraphOffset, paragraphsFor, learningCacheKey,
-  renderLearningText, restoreOffset, visibleOffset } from "./reader.js";
+  learningWindow, renderLearningText, restoreOffset, visibleOffset } from "./reader.js";
 
 const $ = id => document.getElementById(id);
 const api = new Api(apiBase(location.href));
-let session, engine, state, active = null, syncTimer, saveTimer, saving = Promise.resolve();
+let session, engine, state, active = null, syncTimer, saveTimer, learningTimer, saving = Promise.resolve();
 let restoring = false, userScroll = false, generation = 0, openGeneration = 0, busySync = false;
 let savesInFlight = 0, unsaved = null;
+let aiPace = Promise.resolve(), nextAiRequestAt = 0, learningRetryAfter = 0;
+const AI_REQUEST_SPACING_MS = 1_150;
 let statusText = "正在加载书架…";
 let aiStatus = { enabled:false, model:"", cacheVersion:"" };
 let learningPreferences = { bilingual:false, phrases:false };
@@ -50,7 +52,7 @@ function samePosition(a, b) {
 }
 function showLogin(error) {
   generation++; openGeneration++;
-  clearTimeout(syncTimer); clearTimeout(saveTimer);
+  clearTimeout(syncTimer); clearTimeout(saveTimer); clearTimeout(learningTimer);
   active = null; engine = null; state = null; session = null; unsaved = null;
   aiStatus = { enabled:false, model:"", cacheVersion:"" }; updateLearningButtons();
   content.replaceChildren(); $("books").replaceChildren(); $("toc-list").replaceChildren();
@@ -174,7 +176,8 @@ async function openBook(bookId, button) {
     const bundle = await loadBundle(api, session.user.id, book);
     if (runGeneration !== generation || token !== openGeneration) return;
     active = { book, bundle, chapters: chaptersFor(bundle), offset: 0, remote: null, lastSaved: null,
-      translations:{}, phrases:{}, translationLoading:new Set(), learningEpoch:0 };
+      translations:{}, phrases:{}, translationLoading:new Set(),
+      learningPending:{translation:new Set(),phrases:new Set()}, learningEpoch:0 };
     $("book-title").textContent = book.title;
     $("library-view").hidden = true; $("reader-view").hidden = false;
     document.body.classList.add("reading"); errorAt("reader-error", null); errorAt("learning-error", null);
@@ -207,7 +210,7 @@ function restore(offset) {
 }
 function showChapter(index, offset = 0) {
   if (!active) return;
-  clearTimeout(saveTimer); userScroll = false;
+  clearTimeout(saveTimer); clearTimeout(learningTimer); userScroll = false;
   active.chapter = active.chapters.find(c => c.chapterIndex === index) || active.chapters[0];
   active.offset = Math.max(0, Math.min(offset, active.chapter.content.length));
   active.lastSaved = null;
@@ -216,6 +219,7 @@ function showChapter(index, offset = 0) {
   $("chapter-end").textContent = active.chapter === active.chapters.at(-1) ? "— 全书结束 —" : "— 本章结束 —";
   active.learningEpoch++;
   active.translations = {}; active.phrases = {}; active.translationLoading = new Set();
+  active.learningPending = { translation:new Set(), phrases:new Set() };
   errorAt("learning-error", null);
   hydrateLearningCache();
   renderChapterLearning(false);
@@ -281,19 +285,46 @@ function beginLearning(epoch) {
   if (learningPreferences.phrases) processLearning("phrases", epoch);
 }
 
+function scheduleLearning(delay = 250) {
+  clearTimeout(learningTimer);
+  const current = active, epoch = current?.learningEpoch;
+  if (!current || !aiStatus.enabled) return;
+  const wait = Math.max(delay, learningRetryAfter - Date.now());
+  learningTimer = setTimeout(() => {
+    if (current !== active || current.learningEpoch !== epoch) return;
+    if (Date.now() < learningRetryAfter) return scheduleLearning(learningRetryAfter - Date.now());
+    learningRetryAfter = 0;
+    beginLearning(epoch);
+  }, wait);
+}
+
+async function paceAiRequest() {
+  const turn = aiPace.then(async () => {
+    const wait = Math.max(0, nextAiRequestAt - Date.now());
+    if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+    nextAiRequestAt = Date.now() + AI_REQUEST_SPACING_MS;
+  });
+  aiPace = turn.catch(() => {});
+  await turn;
+}
+
 async function processLearning(kind, epoch) {
   const current = active;
   if (!current || current.learningEpoch !== epoch) return;
   const paragraphs = paragraphsFor(current.chapter.content);
-  const starting = Math.max(0, paragraphs.findIndex(p => p.end > current.offset));
-  const queue = [...paragraphs.slice(starting), ...paragraphs.slice(0, starting).reverse()]
-    .filter(p => !Object.hasOwn(kind === "translation" ? current.translations : current.phrases, p.index));
-  let stopped = false;
-  const worker = async () => {
-    while (!stopped && queue.length && current === active && current.learningEpoch === epoch) {
+  const values = kind === "translation" ? current.translations : current.phrases;
+  const pending = current.learningPending[kind];
+  const queue = learningWindow(paragraphs, current.offset)
+    .filter(paragraph => !Object.hasOwn(values, paragraph.index) && !pending.has(paragraph.index));
+  const claimed = queue.map(paragraph => paragraph.index);
+  claimed.forEach(index => pending.add(index));
+  try {
+    while (queue.length && current === active && current.learningEpoch === epoch) {
       const paragraph = queue.shift();
       const enabled = kind === "translation" ? learningPreferences.bilingual : learningPreferences.phrases;
       if (!enabled) break;
+      await paceAiRequest();
+      if (current !== active || current.learningEpoch !== epoch) break;
       if (kind === "translation") {
         current.translationLoading.add(paragraph.index);
         renderChapterLearning();
@@ -312,15 +343,26 @@ async function processLearning(kind, epoch) {
         if (kind === "translation") current.translations[paragraph.index] = value;
         else current.phrases[paragraph.index] = value;
       } catch (error) {
-        stopped = true;
-        if (current === active && current.learningEpoch === epoch) errorAt("learning-error", error);
+        if (error.code === "ai_rate_limited") {
+          learningRetryAfter = Math.max(learningRetryAfter, Date.now() + 61_000);
+          errorAt("learning-error", null);
+          scheduleLearning();
+        } else if (error.code === "ai_upstream_rate_limited") {
+          learningRetryAfter = Math.max(learningRetryAfter, Date.now() + 15_000);
+          errorAt("learning-error", null);
+          scheduleLearning();
+        } else if (current === active && current.learningEpoch === epoch) {
+          errorAt("learning-error", error);
+        }
+        break;
       } finally {
         if (kind === "translation") current.translationLoading.delete(paragraph.index);
         if (current === active && current.learningEpoch === epoch) renderChapterLearning();
       }
     }
-  };
-  await Promise.all([worker(), worker()]);
+  } finally {
+    claimed.forEach(index => pending.delete(index));
+  }
 }
 
 function toggleLearning(kind) {
@@ -358,6 +400,7 @@ function captureScroll() {
   active.offset = visibleOffset(scroller, content);
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => persist(), 120);
+  scheduleLearning();
   updateFooter();
 }
 function page(direction) {

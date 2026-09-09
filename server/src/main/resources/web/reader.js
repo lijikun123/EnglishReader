@@ -44,6 +44,17 @@ export function learningCacheKey(cacheVersion, contentSha256, chapterIndex, para
   return [cacheVersion, contentSha256, chapterIndex, paragraphIndex, kind].join("|");
 }
 
+// Load only the current reading area. The current paragraph comes first, then
+// upcoming paragraphs, followed by a small amount of backward prefetch.
+export function learningWindow(paragraphs, offset, before = 1, after = 5) {
+  if (!paragraphs.length) return [];
+  const found = paragraphs.findIndex(paragraph => paragraph.end > offset);
+  const current = found >= 0 ? found : paragraphs.length - 1;
+  const forward = paragraphs.slice(current, Math.min(paragraphs.length, current + after + 1));
+  const backward = paragraphs.slice(Math.max(0, current - before), current).reverse();
+  return [...forward, ...backward];
+}
+
 export function phraseSegments(text, phrases) {
   const ranges = [];
   phrases.forEach((phrase, phraseIndex) => {
