@@ -31,7 +31,7 @@ docker compose exec -T postgres sh -c \
   sh "$expected_count" "$source_sha256" <<'SQL'
 BEGIN;
 TRUNCATE TABLE dictionary_entries;
-\copy dictionary_entries(word, lemma, phonetic, part_of_speech, chinese_meaning, english_definition, example_sentence) FROM '/tmp/kreader_dictionary_import.csv' WITH (FORMAT csv, HEADER true)
+\copy dictionary_entries(word, lemma, phonetic, part_of_speech, chinese_meaning, english_definition, example_sentence) FROM '/tmp/kreader_dictionary_import.csv' WITH (FORMAT csv, HEADER true, NULL '\N')
 SELECT 1 / CASE WHEN COUNT(*) = :expected_count THEN 1 ELSE 0 END AS verified_count
 FROM dictionary_entries;
 INSERT INTO dictionary_metadata(key, value)
