@@ -102,19 +102,25 @@ Anki 导入时选择 Tab 分隔符，映射 Front / Back，并启用“允许 HT
 # 构建 Debug APK
 ./gradlew :app:assembleDebug
 
+# 原签名密钥不在当前电脑时，构建可与旧 App 同时安装的词典版
+./gradlew :app:assembleSideBySide
+
 # 运行单元测试
 ./gradlew :app:testDebugUnitTest
 ```
 
-Debug APK 路径：`app/build/outputs/apk/debug/app-debug.apk`。
+标准 Debug APK 路径：`app/build/outputs/apk/debug/app-debug.apk`。并行词典版路径：`app/build/outputs/apk/sideBySide/app-sideBySide.apk`，包名为 `com.example.englishreader.dictionary`，桌面名称为“KReader 词典版”。它适合在缺少旧签名密钥时保留并同时安装原 App；登录同一同步账号后可重新加载云端书籍和进度。
 
 USB 安装：在手机启用“开发者选项 → USB 调试”后运行：
 
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# 保留原 App，安装独立词典版
+adb install app/build/outputs/apk/sideBySide/app-sideBySide.apk
 ```
 
-`local.properties`（本机 SDK 路径）、APK、Keystore、部署 `.env` 等本地敏感或构建文件均被 Git 忽略。完整词典属于私有构建输入，也不会进入公开仓库；将有权使用的 CSV 通过 `scripts/build_dictionary.py` 生成 `app/src/main/assets/kreader_dictionary.bin` 后再构建，即可得到内置词典的 APK。没有该资产时源码仍可构建，并保留示例词典与手动导入功能。
+Android 只允许证书相同的 APK 覆盖同一包名。需要保留原 App 本地数据并原位升级时，必须使用生成旧 APK 的原 Keystore；Keystore 无法从旧 APK 或证书指纹还原。`local.properties`（本机 SDK 路径）、APK、Keystore、部署 `.env` 等本地敏感或构建文件均被 Git 忽略。完整词典属于私有构建输入，也不会进入公开仓库；将有权使用的 CSV 通过 `scripts/build_dictionary.py` 生成 `app/src/main/assets/kreader_dictionary.bin` 后再构建，即可得到内置词典的 APK。没有该资产时源码仍可构建，并保留示例词典与手动导入功能。
 
 ## 自建同步服务
 

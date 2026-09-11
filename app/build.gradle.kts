@@ -23,6 +23,14 @@ android {
     }
 
     buildTypes {
+        create("sideBySide") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".dictionary"
+            versionNameSuffix = "-dictionary"
+            resValue("string", "app_name", "KReader 词典版")
+            matchingFallbacks += listOf("debug")
+        }
+
         release {
             isMinifyEnabled = false
             proguardFiles(
