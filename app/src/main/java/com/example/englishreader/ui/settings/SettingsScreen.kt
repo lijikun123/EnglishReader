@@ -112,7 +112,7 @@ fun SettingsScreen(
                     onCheckedChange = viewModel::setPreferChineseFirst,
                 )
                 Text(
-                    text = "当前词典词条：$dictionaryCount 条（含内置示例 + 已导入）",
+                    text = "当前词典词条：$dictionaryCount 条（内置 + 已导入）",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(top = 12.dp),
                 )

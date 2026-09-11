@@ -9,6 +9,7 @@ import com.example.englishreader.data.exporter.AnkiExporter
 import com.example.englishreader.data.importer.DictionaryImporter
 import com.example.englishreader.data.importer.DocumentImporter
 import com.example.englishreader.data.local.AppDatabase
+import com.example.englishreader.data.local.BuiltInDictionaryStore
 import com.example.englishreader.data.repository.AiRepository
 import com.example.englishreader.data.repository.DictionaryRepository
 import com.example.englishreader.data.repository.ReadingRepository
@@ -75,6 +76,7 @@ class AppContainer(context: Context, scope: CoroutineScope) {
     val dictionaryRepository = DictionaryRepository(
         dictionaryDao = database.dictionaryDao(),
         lookupHistoryDao = database.lookupHistoryDao(),
+        builtInDictionary = BuiltInDictionaryStore(appContext),
     )
     val vocabularyRepository = VocabularyRepository(database.vocabularyDao())
 

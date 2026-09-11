@@ -137,6 +137,7 @@ export function friendlyError(error) {
     ai_upstream_error: "AI 服务请求失败，请稍后再试。",
     ai_invalid_response: "AI 返回了无法识别的结果，请重试。",
     ai_input_invalid: "这个段落过长或内容无效，暂时无法处理。",
+    dictionary_input_invalid: "这个单词无法查询。",
   };
   return messages[error.code] || (error instanceof TypeError ? "暂时无法连接服务器，请检查网络后重试。" : error.message) || "操作失败，请重试。";
 }

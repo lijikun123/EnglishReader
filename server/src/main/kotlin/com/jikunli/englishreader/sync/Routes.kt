@@ -22,6 +22,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.decodeFromJsonElement
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+import java.util.Locale
 
 private const val REFRESH_TTL_MILLIS = 30L * 24 * 60 * 60 * 1_000
 private const val MAX_MUTATIONS_PER_PUSH = 100
@@ -95,6 +96,24 @@ fun Route.authenticatedRoutes(
             val user = database.findUserById(call.currentUserId())
                 ?: throw ApiException(HttpStatusCode.Unauthorized, "invalid_token", "Account no longer exists")
             call.respond(UserResponse(user.id.toString(), user.email))
+        }
+
+        get("/dictionary/lookup") {
+            call.currentUserId()
+            val query = normalizeDictionaryWord(call.request.queryParameters["word"].orEmpty())
+            if (query.isEmpty() || query.length > 80) {
+                throw ApiException(HttpStatusCode.BadRequest, "dictionary_input_invalid", "A word between 1 and 80 characters is required")
+            }
+            val direct = database.lookupDictionary(query)
+            val entries = if (direct.isNotEmpty()) {
+                direct
+            } else {
+                dictionaryLemmaCandidate(query)
+                    .takeIf { it != query }
+                    ?.let(database::lookupDictionary)
+                    .orEmpty()
+            }
+            call.respond(DictionaryLookupResponse(query, entries))
         }
 
         post("/auth/logout") {
@@ -212,6 +231,20 @@ fun Route.authenticatedRoutes(
             }
         }
     }
+}
+
+internal fun normalizeDictionaryWord(raw: String): String = raw
+    .trim()
+    .lowercase(Locale.ROOT)
+    .trim('.', ',', '!', '?', ';', ':', '"', '\'', '(', ')', '[', ']', '—', '-', '“', '”', '‘', '’')
+
+internal fun dictionaryLemmaCandidate(word: String): String = when {
+    word.endsWith("ies") && word.length > 4 -> word.dropLast(3) + "y"
+    word.endsWith("es") && word.length > 3 -> word.dropLast(2)
+    word.endsWith("s") && !word.endsWith("ss") && word.length > 2 -> word.dropLast(1)
+    word.endsWith("ing") && word.length > 5 -> word.dropLast(3)
+    word.endsWith("ed") && word.length > 4 -> word.dropLast(2)
+    else -> word
 }
 
 private fun issueSession(

@@ -1,4 +1,4 @@
-# KReader（Kyan's Reader · 英文阅读 App）— v0.1.21
+# KReader（Kyan's Reader · 英文阅读 App）— v0.1.22
 
 面向中文母语英语学习者的 Android 英文阅读器：以阅读体验为先，支持本地导入、查词、AI 辅助、生词本，以及手机与平板之间的自建同步。
 
@@ -6,7 +6,7 @@
 
 - 技术栈：Kotlin · Coroutines/Flow · Jetpack Compose · Material 3 · Navigation Compose · Room · DataStore · WorkManager · MVVM + Repository
 - `minSdk 24`，`compileSdk / targetSdk 36`，Java 17
-- 当前版本：`0.1.21`（versionCode 21）
+- 当前版本：`0.1.22`（versionCode 22）
 - applicationId：`com.example.englishreader`（为保留已安装用户的数据而未更改）
 
 ## 已实现功能
@@ -21,7 +21,7 @@
 
 ### 查词、AI 与词组
 
-- 点击正文英文单词查询本地词典，展示中文释义、音标、词性、英文释义和例句；支持 CSV / JSON 自定义词典导入与基础词形回退。
+- 点击正文英文单词查询本地词典，展示中文释义、音标、词性、英文释义和例句；交付 APK 内置 56,992 个词条，仍支持 CSV / JSON 自定义词典导入与基础词形回退，自定义词条优先。
 - 支持 OpenAI-compatible Chat Completions，默认配置面向 DeepSeek；可进行语境释义、翻译、语法、长难句拆解和精读。
 - AI Key、Base URL、模型和提示词由用户在“设置 → AI”自行配置。Key 使用 Android Keystore 本地保护，**不会上传或参与同步**。
 - 支持双语段落阅读与 AI 词组识别；译文和词组分析在本机缓存。
@@ -114,15 +114,15 @@ USB 安装：在手机启用“开发者选项 → USB 调试”后运行：
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-`local.properties`（本机 SDK 路径）、APK、Keystore、部署 `.env` 等本地敏感或构建文件均被 Git 忽略。
+`local.properties`（本机 SDK 路径）、APK、Keystore、部署 `.env` 等本地敏感或构建文件均被 Git 忽略。完整词典属于私有构建输入，也不会进入公开仓库；将有权使用的 CSV 通过 `scripts/build_dictionary.py` 生成 `app/src/main/assets/kreader_dictionary.bin` 后再构建，即可得到内置词典的 APK。没有该资产时源码仍可构建，并保留示例词典与手动导入功能。
 
 ## 自建同步服务
 
-### 网页版（新增，保留 Android App 0.1.21）
+### 网页版
 
-同步服务附带网页阅读器。更新服务端后，在原同步地址后加 `/web/`，使用 App 的同一账号登录，即可加载已同步的书籍并同步阅读位置。支持 TXT / Markdown / EPUB 纯文本阅读、目录、翻页、双语段落、AI 词组讲解和阅读排版设置，不提供上传、下载文件或删除书籍功能。
+同步服务附带网页阅读器。更新服务端后，在原同步地址后加 `/web/`，使用 App 的同一账号登录，即可加载已同步的书籍并同步阅读位置。支持 TXT / Markdown / EPUB 纯文本阅读、点击查内置词典、目录、翻页、双语段落、AI 词组讲解和阅读排版设置，不提供上传、下载文件或删除书籍功能。
 
-网页与现有 API 同源，复用账号、数据库和进度协议，无需改动 App 或同步地址。AI Key 只配置在 VPS 环境变量中，不进入网页或 GitHub；词典仍待导入 VPS。部署与验证说明见 [`server/WEB_READER.md`](server/WEB_READER.md)。
+网页与现有 API 同源，复用账号、数据库和进度协议，无需更改同步地址。AI Key 只配置在 VPS 环境变量中，不进入网页或 GitHub；词典数据仅导入私有 VPS 数据库。部署与验证说明见 [`server/WEB_READER.md`](server/WEB_READER.md)。
 
 服务端在 [`server/`](server/) 下，是与 Android 工程分离的 Kotlin/Ktor + PostgreSQL 项目。部署说明见 [`server/README.md`](server/README.md)。
 

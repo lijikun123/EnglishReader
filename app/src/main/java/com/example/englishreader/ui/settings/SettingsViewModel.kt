@@ -41,7 +41,7 @@ class SettingsViewModel(
     val preferChineseFirst: StateFlow<Boolean> = settingsRepository.preferChineseFirst
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
-    /** 当前词典词条数（含内置示例 + 已导入）。 */
+    /** 当前词典词条数（内置词典 + 用户导入）。 */
     val dictionaryCount: StateFlow<Int> = dictionaryRepository.observeCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 

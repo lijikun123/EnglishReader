@@ -55,6 +55,10 @@ const server=http.createServer(async(req,res)=>{
     if(!identity)return json({code:"unauthorized"},401);
     if(path===basePath+"v1/auth/logout"){return res.writeHead(204).end();}
     if(path===basePath+"v1/ai/status")return json({enabled:aiEnabled,model:"test-model",cacheVersion:"web-ai-v2:test-model"});
+    if(path===basePath+"v1/dictionary/lookup") {
+      const word=new URL(req.url,"http://localhost").searchParams.get("word");
+      return json({query:word,entries:[{word,lemma:word,phonetic:"/truːθ/",partOfSpeech:"n.",chineseMeaning:"真相；事实",englishDefinition:"a fact that is accepted as true",exampleSentence:"Tell me the truth."}]});
+    }
     if(path===basePath+"v1/ai/translate") {
       aiRequests.push({kind:"translation",...data});
       return json({translation:"这是一段用于浏览器测试的自然中文译文。"});
@@ -93,6 +97,13 @@ p.on("pageerror",e=>errors.push(e.message));
 p.on("console",msg=>{if(msg.type()==="error")errors.push(msg.text());});
 p.on("dialog",d=>d.accept());
 const waitUntil=async(fn)=>{for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,100));}throw new Error("Condition timed out");};
+const visibleReaderIndex=selector=>p.locator(selector).evaluateAll(elements=>{
+  const viewport=document.getElementById("reading-scroll").getBoundingClientRect();
+  return elements.findIndex(element=>{
+    const rect=element.getBoundingClientRect();
+    return rect.top>=viewport.top+20&&rect.bottom<=viewport.bottom-20;
+  });
+});
 try {
   await p.goto(url);
   await p.locator("#email").fill("alice@example.test");await p.locator("#password").fill("wrong");
@@ -102,19 +113,28 @@ try {
   await p.getByRole("button",{name:"继续阅读 →"}).click();
   await p.locator("#reader-view").waitFor({state:"visible"});
   await p.waitForFunction(()=>document.getElementById("reading-scroll").scrollTop>0);
+  const beforeLookup=writes.length;
+  const wordIndex=await visibleReaderIndex(".word-mark");assert.ok(wordIndex>=0);
+  await p.locator(".word-mark").nth(wordIndex).click();
+  await p.locator("#dictionary-dialog[open]").waitFor();
+  await p.locator(".dictionary-chinese").filter({hasText:"真相；事实"}).waitFor();
+  await p.locator('[data-close="dictionary-dialog"]').click();
+  assert.equal(writes.length,beforeLookup,"dictionary lookup must not write reading progress");
   const beforeLearning=writes.length;
   await p.locator("#bilingual-button").click();
   await p.locator(".paragraph-translation").filter({hasText:"自然中文译文"}).first().waitFor();
   await p.locator("#phrases-button").click();
   await p.locator(".phrase-mark").first().waitFor();
-  const phraseStyle=await p.locator(".phrase-mark").first().evaluate(el=>{
+  const phraseIndex=await visibleReaderIndex(".phrase-mark");assert.ok(phraseIndex>=0);
+  const visiblePhrase=p.locator(".phrase-mark").nth(phraseIndex);
+  const phraseStyle=await visiblePhrase.evaluate(el=>{
     const style=getComputedStyle(el);
     return {backgroundColor:style.backgroundColor,borderBottomWidth:style.borderBottomWidth,fontWeight:style.fontWeight};
   });
   assert.equal(phraseStyle.backgroundColor,"rgba(0, 0, 0, 0)");
   assert.equal(phraseStyle.borderBottomWidth,"0px");
   assert.ok(Number(phraseStyle.fontWeight)>=700);
-  await p.locator(".phrase-mark").first().click();
+  await visiblePhrase.click();
   await p.locator("#phrase-dialog[open]").waitFor();
   assert.equal(await p.locator("#phrase-title").textContent(),"universally acknowledged");
   await p.locator('[data-close="phrase-dialog"]').click();

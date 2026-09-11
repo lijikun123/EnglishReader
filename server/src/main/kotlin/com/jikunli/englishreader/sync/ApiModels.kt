@@ -179,3 +179,20 @@ data class AiPhrase(
 data class AiPhrasesResponse(
     val phrases: List<AiPhrase>,
 )
+
+@Serializable
+data class DictionaryEntryResponse(
+    val word: String,
+    val lemma: String,
+    val phonetic: String,
+    val partOfSpeech: String,
+    val chineseMeaning: String,
+    val englishDefinition: String,
+    val exampleSentence: String,
+)
+
+@Serializable
+data class DictionaryLookupResponse(
+    val query: String,
+    val entries: List<DictionaryEntryResponse>,
+)

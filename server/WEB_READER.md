@@ -1,14 +1,37 @@
 # KReader 网页阅读器
 
-网页版随现有同步服务提供，Android App 0.1.21、applicationId、Gradle 配置、数据库结构和原有 API 均保持不变。
+网页版随现有同步服务提供。Android App 0.1.22 增加同一份内置词典，applicationId 和既有用户数据保持不变。
 
 ## 使用
 
 更新服务端后访问 `https://your-domain/kreader-sync/web/`，本机开发访问 `http://localhost:8080/web/`。使用 **App 中同一个同步账号**登录。先在 App 中完成一次同步；只在手机本地、尚未同步的书籍不会出现在网页书架。没有账号时仍使用 App 原有注册流程。
 
-支持云端已有 TXT、Markdown、无 DRM EPUB 的纯文本正文、EPUB 目录和段落锚点，可翻页、滚动、切换章节，调整字号、行距、宽度和浅色/护眼/深色主题；配置服务端 AI 后还可显示双语段落和词组讲解。
+支持云端已有 TXT、Markdown、无 DRM EPUB 的纯文本正文、EPUB 目录和段落锚点，可翻页、滚动、切换章节，调整字号、行距、宽度和浅色/护眼/深色主题；正文英文单词可点击查询内置中英词典，配置服务端 AI 后还可显示双语段落和词组讲解。
 
-不提供上传、导入、下载文件、删除书籍、注册、生词本或词典功能。打开书籍会通过已有接口加载正文，不会生成下载文件或导出入口。Markdown 和 EPUB 按 App 已解析的文本展示，不执行书籍中的 HTML。
+不提供上传、导入、下载文件、删除书籍、注册或生词本功能。词典由 VPS 管理员一次性导入，网页用户没有导入或修改入口。打开书籍会通过已有接口加载正文，不会生成下载文件或导出入口。Markdown 和 EPUB 按 App 已解析的文本展示，不执行书籍中的 HTML。
+
+## 内置词典
+
+- 普通英文单词显示为不干扰排版的可点击文本；AI 词组仍以整段加粗按钮优先。点击单词会调用需要登录的同源 `/v1/dictionary/lookup`，展示音标、词性、中文释义、英文释义和例句。
+- App 使用 APK 内的只读 SQLite 资产，用户手动导入的词条优先；网页版使用 PostgreSQL 全局词典。两者都由同一份 CSV 构建，查词时使用小写归一化和相同的基础词形回退。
+- 原始 CSV、Android 词典资产和服务端导入包均被 Git 忽略，不会进入公开仓库。公开仓库只保存生成和读取逻辑。
+
+在仓库根目录生成私有构建产物：
+
+```sh
+python scripts/build_dictionary.py /path/to/kreader_dict.csv \
+  --android-output app/src/main/assets/kreader_dictionary.bin \
+  --postgres-output private/kreader_dictionary.postgres.csv.gz
+```
+
+服务端升级到包含 `V2__built_in_dictionary.sql` 的镜像后，导入 PostgreSQL：
+
+```sh
+cd server/deploy
+sh import-dictionary.sh ../../private/kreader_dictionary.postgres.csv.gz SOURCE_CSV_SHA256 56992
+```
+
+导入脚本先校验 gzip，随后在一个数据库事务中替换词条、核对数量并写入来源 SHA-256。正式执行前应先运行现有 PostgreSQL 备份脚本。由于输入文件没有来源或许可证说明，部署者应只使用自己有权使用的词典数据。
 
 ## 双语与词组
 
@@ -79,7 +102,7 @@ curl --fail http://127.0.0.1:18080/healthz
 curl --fail -o /dev/null http://127.0.0.1:18080/web/
 ```
 
-本次不需要数据库迁移，请勿执行 `docker compose down -v`。如 VPS 只保留了 `server/`，更新对应的服务端文件，继续沿用原来的 `deploy/.env` 和数据卷。
+服务启动时 Flyway 会自动新增只读词典表；词条仍需通过上面的导入脚本写入。不要执行 `docker compose down -v`。如 VPS 只保留了 `server/`，更新对应的服务端文件，继续沿用原来的 `deploy/.env` 和数据卷。
 
 ## 开发验证
 

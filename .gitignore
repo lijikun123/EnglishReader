@@ -9,6 +9,8 @@
 .cxx
 /.kotlin
 /app/build
+/app/src/main/assets/kreader_dictionary.bin
+/private
 /server/.gradle
 /server/.kotlin
 /server/build

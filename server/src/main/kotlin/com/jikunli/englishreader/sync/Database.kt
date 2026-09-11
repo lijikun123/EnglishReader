@@ -473,6 +473,40 @@ class KreaderDatabase private constructor(
         }
     }
 
+    fun lookupDictionary(word: String): List<DictionaryEntryResponse> = withConnection { connection ->
+        connection.prepareStatement(
+            """
+            SELECT word, lemma, phonetic, part_of_speech, chinese_meaning,
+                   english_definition, example_sentence
+            FROM dictionary_entries
+            WHERE word = ? OR lemma = ?
+            ORDER BY CASE WHEN word = ? THEN 0 ELSE 1 END, word
+            LIMIT 12
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setString(1, word)
+            statement.setString(2, word)
+            statement.setString(3, word)
+            statement.executeQuery().use { result ->
+                buildList {
+                    while (result.next()) {
+                        add(
+                            DictionaryEntryResponse(
+                                word = result.getString("word"),
+                                lemma = result.getString("lemma"),
+                                phonetic = result.getString("phonetic"),
+                                partOfSpeech = result.getString("part_of_speech"),
+                                chineseMeaning = result.getString("chinese_meaning"),
+                                englishDefinition = result.getString("english_definition"),
+                                exampleSentence = result.getString("example_sentence"),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     fun assertActiveBookContent(userId: UUID, bookId: UUID, contentSha256: String) = withConnection { connection ->
         connection.prepareStatement(
             "SELECT 1 FROM books WHERE id = ? AND user_id = ? AND LOWER(content_sha256) = ? AND bundle_ready = TRUE AND deleted_at IS NULL",

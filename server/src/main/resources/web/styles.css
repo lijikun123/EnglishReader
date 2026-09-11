@@ -85,9 +85,20 @@ body.reading .app-header { display:none; }
 .paragraph-translation.loading { opacity:.68; font-style:italic; }
 .phrase-mark { display:inline; min-height:0; margin:0; padding:0; border:0; border-radius:0; background:none; color:inherit; font:inherit; font-weight:700; letter-spacing:inherit; line-height:inherit; text-align:inherit; }
 .phrase-mark:hover:not(:disabled) { background:none; color:inherit; }
+.word-mark { color:inherit; cursor:pointer; }
+.word-mark:hover { color:var(--primary); text-decoration:underline dotted; text-underline-offset:.16em; }
 .phrase-type { display:block; min-height:1em; color:var(--primary); font-size:.75rem; letter-spacing:1px; margin-bottom:7px; }
 .phrase-explanation { white-space:pre-wrap; line-height:1.8; }
 .phrase-source { margin:20px 0 0; padding:14px 16px; border-left:3px solid var(--primary); background:var(--tint); color:var(--muted); font:italic .875rem/1.7 Georgia,"Times New Roman",serif; white-space:pre-wrap; }
+.dictionary-label { display:block; color:var(--primary); font-size:.75rem; letter-spacing:1px; margin-bottom:7px; }
+.dictionary-meta { margin:5px 0 0; color:var(--muted); font-size:.875rem; }
+.dictionary-entries { overflow-y:auto; max-height:58dvh; }
+.dictionary-entry + .dictionary-entry { border-top:1px solid var(--line); margin-top:18px; padding-top:18px; }
+.dictionary-entry h3 { margin:0 0 8px; font-size:1rem; }
+.dictionary-entry p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.75; }
+.dictionary-chinese { color:var(--primary); font-weight:600; margin:0; }
+.dictionary-english { color:var(--muted); margin:8px 0 0; }
+.dictionary-example { font:italic .875rem/1.7 Georgia,"Times New Roman",serif; margin:8px 0 0; }
 .chapter-end { text-align:center; margin:55px 0 0; color:var(--muted); font-size:.875rem; }
 .reader-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 24px max(12px,env(safe-area-inset-bottom)); border-top:1px solid var(--line); background:var(--surface); flex-shrink:0; }
 .reading-status { display:flex; flex-direction:column; align-items:center; gap:5px; font-size:.875rem; text-align:center; }

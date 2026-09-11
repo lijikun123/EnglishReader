@@ -1,18 +1,28 @@
 package com.example.englishreader.data.repository
 
 import com.example.englishreader.data.local.dao.DictionaryDao
+import com.example.englishreader.data.local.BuiltInDictionaryStore
 import com.example.englishreader.data.local.dao.LookupHistoryDao
 import com.example.englishreader.data.local.entity.DictionaryEntry
 import com.example.englishreader.data.local.entity.LookupHistory
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 
 class DictionaryRepository(
     private val dictionaryDao: DictionaryDao,
     private val lookupHistoryDao: LookupHistoryDao,
+    private val builtInDictionary: BuiltInDictionaryStore,
 ) {
 
     /** 当前词典词条总数（实时）。 */
-    fun observeCount(): Flow<Int> = dictionaryDao.observeCount()
+    fun observeCount(): Flow<Int> = combine(
+        dictionaryDao.observeCount(),
+        flow { emit(builtInDictionary.count()) },
+    ) { customCount, builtInCount -> customCount + builtInCount }
+        .flowOn(Dispatchers.IO)
 
     /**
      * 导入词条：对同名 word 先删后插（导入词典优先、避免重复），其余内置词条保留。
@@ -33,11 +43,15 @@ class DictionaryRepository(
         val normalized = normalize(rawWord)
         if (normalized.isEmpty()) return emptyList()
 
-        val direct = dictionaryDao.findEntries(normalized)
+        val direct = dictionaryDao.findEntries(normalized).ifEmpty { builtInDictionary.lookup(normalized) }
         if (direct.isNotEmpty()) return direct
 
         val lemma = naiveLemma(normalized)
-        return if (lemma != normalized) dictionaryDao.findEntries(lemma) else emptyList()
+        return if (lemma != normalized) {
+            dictionaryDao.findEntries(lemma).ifEmpty { builtInDictionary.lookup(lemma) }
+        } else {
+            emptyList()
+        }
     }
 
     suspend fun recordLookup(word: String, sentence: String, readingItemId: Long?) {

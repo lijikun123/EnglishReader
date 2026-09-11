@@ -97,6 +97,12 @@ KREADER_AI_MODEL=qwen-plus</code></pre>
     <p id="phrase-explanation" class="phrase-explanation"></p>
     <p id="phrase-source" class="phrase-source"></p>
   </dialog>
+  <dialog id="dictionary-dialog" aria-labelledby="dictionary-title">
+    <div class="dialog-heading"><div><span class="dictionary-label">内置词典</span><h2 id="dictionary-title"></h2><p id="dictionary-meta" class="dictionary-meta"></p></div><button class="quiet" data-close="dictionary-dialog" aria-label="关闭词典">✕</button></div>
+    <p id="dictionary-error" class="error" role="alert" hidden></p>
+    <p id="dictionary-loading" class="muted">正在查词…</p>
+    <div id="dictionary-entries" class="dictionary-entries"></div>
+  </dialog>
   <noscript>请启用 JavaScript，以登录账号并同步阅读进度。</noscript>
 </body>
 </html>

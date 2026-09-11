@@ -105,6 +105,34 @@ export function renderText(container, text) {
   renderLearningText(container, text);
 }
 
+function appendWordText(container, text, onWord, source) {
+  if (!onWord) {
+    container.append(document.createTextNode(text));
+    return;
+  }
+  const wordPattern = /[A-Za-z]+(?:[’'][A-Za-z]+)*(?:-[A-Za-z]+(?:[’'][A-Za-z]+)*)*/g;
+  let cursor = 0;
+  for (const match of text.matchAll(wordPattern)) {
+    if (match.index > cursor) container.append(document.createTextNode(text.slice(cursor, match.index)));
+    const mark = document.createElement("span");
+    mark.className = "word-mark";
+    mark.textContent = match[0];
+    mark.tabIndex = 0;
+    mark.setAttribute("role", "button");
+    mark.setAttribute("aria-label", match[0] + "，查词");
+    mark.addEventListener("click", () => onWord(match[0], source));
+    mark.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onWord(match[0], source);
+      }
+    });
+    container.append(mark);
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) container.append(document.createTextNode(text.slice(cursor)));
+}
+
 export function renderLearningText(container, text, options = {}) {
   container.replaceChildren();
   const fragment = document.createDocumentFragment();
@@ -120,7 +148,7 @@ export function renderLearningText(container, text, options = {}) {
     const english = document.createElement("span");
     english.className = "paragraph-english";
     for (const segment of phraseSegments(paragraph.text, phrases[paragraph.index] || [])) {
-      if (segment.phraseIndex === null) english.append(document.createTextNode(segment.text));
+      if (segment.phraseIndex === null) appendWordText(english, segment.text, options.onWord, paragraph.text);
       else {
         const mark = document.createElement("button");
         mark.type = "button";
@@ -170,7 +198,14 @@ export function restoreOffset(scroller, container, offset) {
   if (!point) { scroller.scrollTop = 0; return; }
   const range = document.createRange();
   range.setStart(point.node, point.offset);
-  range.setEnd(point.node, Math.min(point.node.length, point.offset + 1));
+  const end = textPoint(block.root, Math.min(block.root.textContent.length, block.offset + 1));
+  if (end) range.setEnd(end.node, end.offset);
+  // An offset can land exactly between the small text nodes used for clickable
+  // words. Keep a one-character range so the browser returns useful geometry.
+  if (range.collapsed && block.offset > 0) {
+    const previous = textPoint(block.root, block.offset - 1);
+    if (previous) range.setStart(previous.node, previous.offset);
+  }
   const rect = range.getBoundingClientRect();
   if (rect.height) scroller.scrollTop += rect.top - scroller.getBoundingClientRect().top - 24;
 }
@@ -178,7 +213,11 @@ export function restoreOffset(scroller, container, offset) {
 export function visibleOffset(scroller, container) {
   if (!container.children.length) return 0;
   const targetY = scroller.getBoundingClientRect().top + 25;
-  const element = [...container.children].find(el => el.getBoundingClientRect().bottom > targetY) || container.lastElementChild;
+  // Translations belong to the paragraph visually but are not part of Android's
+  // English-text offset. Choose the block from the English line geometry only.
+  const element = [...container.children].find(el =>
+    (el.querySelector(".paragraph-english") || el).getBoundingClientRect().bottom > targetY
+  ) || container.lastElementChild;
   const root = element.querySelector(".paragraph-english") || element;
   const length = root.textContent.length;
   if (!length) return Number(element.dataset.start);

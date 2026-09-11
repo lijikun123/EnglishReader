@@ -10,6 +10,8 @@ let session, engine, state, active = null, syncTimer, saveTimer, learningTimer, 
 let restoring = false, userScroll = false, generation = 0, openGeneration = 0, busySync = false;
 let savesInFlight = 0, unsaved = null;
 let aiPace = Promise.resolve(), nextAiRequestAt = 0, learningRetryAfter = 0;
+let dictionaryRequest = 0;
+const dictionaryCache = new Map();
 const AI_REQUEST_SPACING_MS = 1_150;
 let statusText = "正在加载书架…";
 let aiStatus = { enabled:false, model:"", cacheVersion:"" };
@@ -250,6 +252,75 @@ function showPhrase(phrase, source) {
   $("phrase-dialog").showModal();
 }
 
+function renderDictionary(result) {
+  $("dictionary-entries").replaceChildren();
+  $("dictionary-meta").textContent = "";
+  if (!result.entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "内置词典暂未收录这个词。";
+    $("dictionary-entries").append(empty);
+    return;
+  }
+  const first = result.entries[0];
+  $("dictionary-meta").textContent = [first.phonetic, first.partOfSpeech].filter(Boolean).join("  ");
+  for (const [index, entry] of result.entries.entries()) {
+    const block = document.createElement("section");
+    block.className = "dictionary-entry";
+    if (index > 0 || entry.word !== result.query) {
+      const headword = document.createElement("h3");
+      headword.textContent = entry.word;
+      block.append(headword);
+    }
+    if (entry.chineseMeaning) {
+      const meaning = document.createElement("p");
+      meaning.className = "dictionary-chinese";
+      meaning.textContent = entry.chineseMeaning;
+      block.append(meaning);
+    }
+    if (entry.englishDefinition) {
+      const definition = document.createElement("p");
+      definition.className = "dictionary-english";
+      definition.textContent = entry.englishDefinition;
+      block.append(definition);
+    }
+    if (entry.exampleSentence) {
+      const example = document.createElement("p");
+      example.className = "dictionary-example";
+      example.textContent = "例：" + entry.exampleSentence;
+      block.append(example);
+    }
+    $("dictionary-entries").append(block);
+  }
+}
+
+async function showDictionary(word) {
+  if (!session) return;
+  const query = word.trim().toLowerCase();
+  if (!query) return;
+  const request = ++dictionaryRequest;
+  $("dictionary-title").textContent = query;
+  $("dictionary-meta").textContent = "";
+  $("dictionary-entries").replaceChildren();
+  errorAt("dictionary-error", null);
+  $("dictionary-loading").hidden = false;
+  const dialog = $("dictionary-dialog");
+  if (!dialog.open) dialog.showModal();
+  try {
+    let result = dictionaryCache.get(query);
+    if (!result) {
+      result = await api.json("v1/dictionary/lookup?word=" + encodeURIComponent(query), session.user.id);
+      dictionaryCache.set(query, result);
+      if (dictionaryCache.size > 500) dictionaryCache.delete(dictionaryCache.keys().next().value);
+    }
+    if (request === dictionaryRequest && dialog.open) renderDictionary(result);
+  } catch (error) {
+    if (request === dictionaryRequest && dialog.open) errorAt("dictionary-error", error);
+  } finally {
+    if (request === dictionaryRequest) $("dictionary-loading").hidden = true;
+  }
+}
+
 function renderChapterLearning(preserve = true) {
   if (!active) return;
   const anchor = preserve && content.children.length ? visibleOffset(scroller, content) : active.offset;
@@ -259,6 +330,7 @@ function renderChapterLearning(preserve = true) {
     translationLoading:learningPreferences.bilingual ? active.translationLoading : new Set(),
     phrases:learningPreferences.phrases ? active.phrases : {},
     onPhrase:showPhrase,
+    onWord:showDictionary,
   });
   if (preserve) restore(anchor);
 }
@@ -507,7 +579,7 @@ $("settings-dialog").addEventListener("input", () => {
 scroller.addEventListener("scroll", captureScroll, { passive:true });
 for (const event of ["wheel","touchmove"]) scroller.addEventListener(event, () => { userScroll = true; }, { passive:true });
 scroller.addEventListener("pointerdown", event => {
-  if (!event.target.closest("button")) userScroll = true;
+  if (!event.target.closest("button,.word-mark")) userScroll = true;
 }, { passive:true });
 document.addEventListener("keydown", event => {
   if (!active || document.querySelector("dialog[open]") ||
